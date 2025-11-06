@@ -4,6 +4,9 @@
   "description": "MCP Server for mendicant_bias orchestration intelligence - orchestrates AI agents for complex software tasks",
   "main": "dist/index.js",
   "type": "module",
+  "bin": {
+    "mendicant-mcp-server": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
