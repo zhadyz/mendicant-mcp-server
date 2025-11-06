@@ -12,6 +12,25 @@ Orchestration intelligence for the mendicant_bias distributed agent system.
 - Add `mendicant_analyze` only after planning proven useful
 - This server provides structure, YOU provide intelligence
 
+## Installation
+
+Add to your Claude Code MCP config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "mendicant": {
+      "command": "npx",
+      "args": ["-y", "github:zhadyz/mendicant-mcp-server"]
+    }
+  }
+}
+```
+
+Restart Claude Code, then verify: `Can you list your available MCP tools?`
+
+For detailed setup instructions, see [MCP_SETUP.md](./MCP_SETUP.md).
+
 ## What Is This?
 
 This MCP server provides **strategic planning and coordination logic** for orchestrating Claude Code's specialized agents. It does NOT execute agents itself - instead, it provides intelligence that Claude Code consults when deciding:
