@@ -1,17 +1,148 @@
 # Mendicant MCP Server
 
-Strategic orchestration intelligence for Claude Code's distributed agent ecosystem, featuring adaptive learning through pattern recognition.
+Advanced adaptive intelligence for Claude Code's distributed agent ecosystem, featuring genuine probabilistic reasoning and closed-loop learning.
 
 ## Overview
 
-Mendicant MCP Server provides planning, coordination, and adaptive learning capabilities for orchestrating Claude Code's specialized agents. The server implements the mendicant_bias orchestration pattern, enabling intelligent multi-agent workflows with continuous improvement through execution feedback.
+Mendicant MCP Server provides strategic planning, real-time adaptive execution, and comprehensive learning capabilities for orchestrating Claude Code's specialized agents. The server implements the mendicant_bias orchestration pattern with **8 advanced intelligence systems** enabling genuine adaptive AI behavior.
 
 **Core Capabilities:**
-- Strategic agent selection and execution planning
-- Adaptive learning from execution history (Mahoraga system)
+- Strategic agent selection with Bayesian inference
+- Real-time adaptive execution with mid-execution plan modification
+- Temporal knowledge decay with domain-specific half-lives
+- Multi-objective Pareto optimization (accuracy/cost/latency)
+- Predictive conflict detection and automatic resolution
+- Semantic understanding of objectives (multi-label classification)
+- Comprehensive closed-loop learning across all systems
+- Agent communication and coordination infrastructure
+
+## Version History
+
+### v0.2.0 - Advanced Adaptive Intelligence (2025-01-05)
+**Commit:** `fdbb15c` - feat: Implement advanced adaptive intelligence systems
+
+**Architectural Transformation:**
+- Evolved from rule-based orchestration to genuine adaptive AI
+- Implemented 8 new intelligence systems (4,657 lines added)
+- Integrated Bayesian probabilistic reasoning throughout
+- Enabled real-time plan adaptation during execution
+- Established comprehensive closed-loop learning
+
+**New Intelligence Systems:**
+
+1. **Bayesian Confidence Engine** (`bayesian_confidence.ts`)
+   - Probabilistic inference with prior/likelihood/posterior calculation
+   - Isotonic regression calibration with Brier score tracking
+   - 95% confidence intervals using z-score = 1.96
+   - Adaptive prior learning from execution outcomes
+
+2. **Temporal Decay Engine** (`temporal_decay.ts`)
+   - Domain-specific knowledge half-lives:
+     - React/Frameworks: 45 days
+     - APIs: 120 days
+     - Databases: 270 days
+     - Algorithms: 550 days
+     - Fundamentals: 730 days
+   - Exponential decay: `relevance(t) = score × exp(-λt)` where `λ = ln(2)/half_life`
+   - Automatic staleness filtering for pattern matching
+
+3. **Feedback Loop System** (`feedback_loop.ts`)
+   - Comprehensive closed-loop learning after every execution
+   - Updates all intelligence systems based on outcomes
+   - Tracks 5 learning metrics:
+     - Calibration quality (Brier score)
+     - Semantic accuracy
+     - Agent prediction accuracy
+     - Conflict prediction accuracy
+     - Temporal knowledge freshness
+   - Automatic Bayesian prior updates
+
+4. **Adaptive Executor** (`adaptive_executor.ts`)
+   - Real-time plan modification during execution
+   - 5 recovery strategies:
+     - Retry (transient failures)
+     - Substitute (swap failed agent)
+     - Skip (non-critical agent)
+     - Alternative path (different approach)
+     - Rollback (undo and restart)
+   - 5 execution states: running, recovering, adapting, failed, completed
+   - Mahoraga-style adaptation with continuous replanning
+
+5. **Pareto Optimizer** (`pareto_optimizer.ts`)
+   - Multi-objective optimization balancing:
+     - Prediction accuracy
+     - Token cost
+     - Execution latency
+   - Finds non-dominated solutions on Pareto frontier
+   - Weighted objective function: `w₁×accuracy + w₂×(1-cost) + w₃×(1-latency)`
+
+6. **Predictive Conflict Detector** (`predictive_conflict_detector.ts`)
+   - 4 conflict types:
+     - Resource contention
+     - Semantic contradiction
+     - Ordering dependency
+     - Capability overlap
+   - Automatic resolution recommendations (reorder, remove, modify)
+   - Confidence scoring per prediction
+   - Historical conflict pattern learning
+
+7. **Semantic Embedder** (`semantic_embedder.ts`)
+   - Multi-label classification for objectives
+   - 12 intent categories: implementation, refactoring, testing, documentation, debugging, optimization, research, deployment, security, migration, monitoring, maintenance
+   - 15 domain categories: frontend, backend, database, devops, api, testing, security, documentation, infrastructure, performance, ui_ux, data, ml, mobile, desktop
+   - Cosine similarity for pattern matching
+   - TF-IDF weighting for keyword importance
+
+8. **Agent Communication Bus** (`agent_communication_bus.ts`)
+   - Multi-agent coordination infrastructure
+   - 6 message types: info, request, response, coordination, error, completion
+   - 4 priority levels: low, normal, high, urgent
+   - Request/response pattern with timeout handling
+   - Message history and conversation threading
+
+**Core System Enhancements:**
+
+- **planner.ts** - Integrated all 7 intelligence systems
+  - Semantic analysis for objective understanding
+  - Bayesian + Pareto for low-confidence scenarios
+  - Temporal filtering for stale patterns
+  - Predictive conflict detection with auto-resolution
+
+- **executor.ts** - Real-time adaptive execution
+  - Adaptive execution loop with state machine
+  - Automatic recovery from agent failures
+  - Safety limits to prevent infinite loops
+  - Continuous plan optimization during execution
+
+- **coordinator.ts** - Closed-loop learning
+  - `recordExecutionWithFeedbackLoop()` updates all systems
+  - Comprehensive feedback collection
+  - Dual-layer memory: Mahoraga (RAM) + Mnemosyne (persistent)
+  - Performance metrics tracking and logging
+
+- **mahoraga.ts** - Enhanced with advanced intelligence
+  - Bayesian inference in `calculatePredictiveScore()`
+  - Temporal decay filtering for pattern relevance
+  - Multi-objective `refinePlan()` with Pareto optimization
+  - `generateAlternativePlans()` for plan variations
+  - Async-compatible API
+
+**Impact:**
+- Before: Rule-based orchestration with simple heuristics
+- After: Advanced adaptive AI with genuine probabilistic reasoning
+- Learning: Every execution improves future predictions
+- Adaptation: Plans modify in real-time based on agent performance
+
+### v0.1.1 - Initial Release (2025-01-04)
+**Commit:** `99154f2` - Initial Mahoraga implementation
+
+**Core Features:**
+- Basic orchestration planning with pattern matching
+- Agent registry with performance tracking
+- Simple Mahoraga adaptive learning system
 - Failure analysis and plan refinement
-- Project health assessment and recommendations
-- Result coordination and synthesis support
+- Project health assessment
+- Built-in workflow patterns (SCAFFOLD, FIX_TESTS, etc.)
 
 ## Installation
 
@@ -67,15 +198,42 @@ User Request
     ↓
 Claude Code (embodying mendicant_bias orchestration pattern)
     ↓
-mendicant_plan(objective, context) → Strategic orchestration plan
+┌─────────────────────────────────────────────────────────────────┐
+│ mendicant_plan(objective, context)                              │
+│   ├─ Semantic Embedder: Multi-label classification             │
+│   ├─ Temporal Decay: Filter stale patterns                     │
+│   ├─ Bayesian Engine: Calculate confidence intervals           │
+│   ├─ Conflict Detector: Predict and resolve conflicts          │
+│   ├─ Pareto Optimizer: Multi-objective optimization            │
+│   └─ Output: Strategic orchestration plan                      │
+└─────────────────────────────────────────────────────────────────┘
     ↓
-Claude spawns agents via Task tool (parallel/sequential/phased)
+┌─────────────────────────────────────────────────────────────────┐
+│ Adaptive Executor: Real-time plan modification                 │
+│   ├─ Execute agent via Task tool                               │
+│   ├─ Monitor execution state (running/recovering/adapting)     │
+│   ├─ Apply recovery strategies if needed                       │
+│   └─ Continuous replanning based on results                    │
+└─────────────────────────────────────────────────────────────────┘
     ↓
 Task(hollowed_eyes), Task(loveless), Task(the_architect), etc.
     ↓
-[Optional] mendicant_coordinate(results) → Structured synthesis
+┌─────────────────────────────────────────────────────────────────┐
+│ mendicant_coordinate(results, plan, context)                   │
+│   ├─ Synthesize agent outputs                                  │
+│   ├─ Detect conflicts and gaps                                 │
+│   └─ Generate recommendations                                  │
+└─────────────────────────────────────────────────────────────────┘
     ↓
-[Feedback Loop] mendicant_record_feedback() → Mahoraga learning
+┌─────────────────────────────────────────────────────────────────┐
+│ Feedback Loop: Comprehensive closed-loop learning              │
+│   ├─ Update Bayesian priors from outcomes                      │
+│   ├─ Calibrate semantic embeddings                             │
+│   ├─ Update agent prediction models                            │
+│   ├─ Learn conflict patterns                                   │
+│   ├─ Apply temporal decay to knowledge                         │
+│   └─ Record to Mahoraga (RAM) + Mnemosyne (persistent)        │
+└─────────────────────────────────────────────────────────────────┘
     ↓
 Present unified output to user
 ```
@@ -83,10 +241,17 @@ Present unified output to user
 ### Design Philosophy
 
 **Separation of Concerns:**
-- **MCP Server:** Pattern matching, agent selection, execution strategy, learning from history
-- **Claude Code:** Semantic understanding, synthesis, context awareness, execution
+- **MCP Server:** Probabilistic reasoning, adaptive execution, multi-objective optimization, temporal awareness, predictive conflict detection
+- **Claude Code:** Semantic understanding, synthesis, context awareness, final execution decisions
 
-**Key Principle:** This server provides *structural intelligence*, not *semantic understanding*. Claude Code remains the orchestrator; the server provides strategic guidance.
+**Key Principle:** This server provides *adaptive intelligence* through Bayesian inference, temporal decay, and closed-loop learning. Claude Code remains the orchestrator with semantic understanding; the server provides strategic guidance with probabilistic confidence.
+
+**Adaptive Intelligence:**
+- Every execution improves future predictions (Bayesian priors)
+- Knowledge ages with domain-specific half-lives (temporal decay)
+- Plans adapt in real-time during execution (adaptive executor)
+- Multiple objectives balanced automatically (Pareto optimization)
+- Conflicts predicted and resolved proactively (conflict detector)
 
 ## Tools Reference
 
@@ -416,22 +581,40 @@ For persistent learning across sessions, integrate with mnemosyne MCP:
 3. Query similar patterns via `mendicant_find_patterns`
 4. Build institutional memory of successful patterns
 
-## Limitations
+## Capabilities & Limitations
 
-**What the server provides:**
-- Agent capability matching
-- Execution ordering and dependency management
-- Pattern-based workflow templates
-- Statistical learning from execution history
-- Structured planning and coordination output
+**What the server provides (v0.2.0):**
+- ✅ Probabilistic agent selection with Bayesian inference
+- ✅ Real-time adaptive execution with automatic recovery
+- ✅ Temporal knowledge decay with domain-specific half-lives
+- ✅ Multi-objective optimization (accuracy/cost/latency)
+- ✅ Predictive conflict detection with automatic resolution
+- ✅ Semantic objective classification (multi-label)
+- ✅ Comprehensive closed-loop learning across all systems
+- ✅ Pattern-based workflow templates with confidence scoring
+- ✅ Agent communication and coordination infrastructure
+- ✅ Execution ordering and dependency management
+- ✅ Structured planning and coordination output
 
 **What the server cannot do:**
-- Semantic conflict detection (requires LLM intelligence)
-- Codebase-specific understanding (context must be provided)
-- True synthesis (coordination provides structure, not understanding)
-- Real-time context awareness (operates on provided data)
+- Deep semantic understanding (requires LLM intelligence - provided by Claude Code)
+- Codebase-specific analysis (context must be provided)
+- Code synthesis (coordination provides structure, not implementation)
+- Direct file system operations (Claude Code handles this)
 
-**Design rationale:** Structural intelligence in the MCP; semantic intelligence in Claude Code.
+**Design rationale:** Adaptive probabilistic intelligence in the MCP; semantic understanding and execution in Claude Code.
+
+**Comparison:**
+
+| Capability | v0.1.1 | v0.2.0 |
+|-----------|--------|--------|
+| Planning | Rule-based | Bayesian + Pareto |
+| Execution | Static | Real-time adaptive |
+| Learning | Simple statistics | Closed-loop + temporal |
+| Confidence | Heuristic | Probabilistic (95% CI) |
+| Conflicts | Post-detection | Predictive + resolution |
+| Knowledge | No decay | Domain-specific decay |
+| Optimization | Single objective | Multi-objective (Pareto) |
 
 ## Development
 
