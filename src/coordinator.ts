@@ -1,18 +1,20 @@
 import type { AgentResult, CoordinationResult, Conflict, Gap } from './types.js';
+import { agentRegistry } from './knowledge/agent_registry.js';
 
 /**
  * Coordinates and synthesizes results from multiple agents
- * 
+ *
  * This handles:
  * - Combining outputs into unified response
  * - Detecting conflicts between agents
  * - Identifying gaps in coverage
  * - Making recommendations for next steps
+ * - Recording feedback for passive learning
  */
-export function coordinateResults(
+export async function coordinateResults(
   objective: string,
   agentResults: AgentResult[]
-): CoordinationResult {
+): Promise<CoordinationResult> {
   
   // Check if any agents failed
   const failures = agentResults.filter(r => !r.success);
@@ -34,7 +36,10 @@ export function coordinateResults(
   
   // Determine if verification is needed
   const verification_needed = shouldVerify(agentResults);
-  
+
+  // Record feedback for passive learning (async, non-blocking)
+  recordAgentFeedback(agentResults);
+
   return {
     synthesis,
     conflicts,
@@ -42,6 +47,23 @@ export function coordinateResults(
     recommendations,
     verification_needed
   };
+}
+
+/**
+ * Records feedback from agent executions for passive learning
+ * This runs async and doesn't block the coordinator response
+ */
+function recordAgentFeedback(results: AgentResult[]): void {
+  for (const result of results) {
+    agentRegistry.recordFeedback({
+      agent_id: result.agent_id,
+      success: result.success,
+      tokens_used: result.tokens_used,
+      duration_ms: result.duration_ms
+    }).catch(err => {
+      console.error(`Failed to record feedback for ${result.agent_id}:`, err);
+    });
+  }
 }
 
 /**

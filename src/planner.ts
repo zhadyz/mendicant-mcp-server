@@ -1,5 +1,5 @@
 import type { OrchestrationPlan, ProjectContext, Constraints, AgentSpec, AgentId } from './types.js';
-import { AGENT_CAPABILITIES, selectAgents, estimateTokens } from './knowledge/agent_specs.js';
+import { selectAgentsFromRegistry, estimateTokensFromRegistry, getAgentSpec } from './knowledge/agent_specs.js';
 import { matchPattern } from './knowledge/patterns.js';
 import type { PastExecution } from './integration/mnemosyne.js';
 import { findSimilarExecutions, shouldReusePattern, recommendAgents } from './integration/mnemosyne.js';
@@ -50,19 +50,19 @@ export async function createPlan(
 /**
  * Generates a custom orchestration plan from scratch
  */
-function generateCustomPlan(
+async function generateCustomPlan(
   objective: string,
   context?: ProjectContext,
   constraints?: Constraints,
   pastExecutions?: PastExecution[]
-): OrchestrationPlan {
-  
+): Promise<OrchestrationPlan> {
+
   // Analyze objective to determine required capabilities
   const requiredCapabilities = analyzeObjective(objective);
-  
-  // Select agents based on capabilities
-  let agents = selectAgents(requiredCapabilities);
-  
+
+  // Select agents based on capabilities (using registry)
+  let agents = await selectAgentsFromRegistry(requiredCapabilities);
+
   // Consider recommendations from past executions
   if (pastExecutions && pastExecutions.length > 0) {
     const recommended = recommendAgents(objective, pastExecutions);
@@ -71,31 +71,34 @@ function generateCustomPlan(
       agents = [...new Set([...recommended, ...agents])];
     }
   }
-  
+
   // Apply constraints
   if (constraints?.max_agents && agents.length > constraints.max_agents) {
     agents = agents.slice(0, constraints.max_agents);
   }
-  
-  // Create agent specs with prompts
-  const agentSpecs: AgentSpec[] = agents.map(agentId => 
-    createAgentSpec(agentId, objective, context)
+
+  // Create agent specs with prompts (async now)
+  const agentSpecs: AgentSpec[] = await Promise.all(
+    agents.map(agentId => createAgentSpec(agentId, objective, context))
   );
-  
+
   // Determine execution strategy
   const execution_strategy = determineExecutionStrategy(agentSpecs, constraints);
-  
+
   // Build phases if phased execution
-  const phases = execution_strategy === 'phased' 
-    ? buildPhases(agentSpecs) 
+  const phases = execution_strategy === 'phased'
+    ? buildPhases(agentSpecs)
     : undefined;
-  
+
+  // Estimate tokens using registry
+  const estimated_tokens = await estimateTokensFromRegistry(agents);
+
   return {
     agents: agentSpecs,
     execution_strategy,
     phases,
     success_criteria: deriveSuccessCriteria(objective),
-    estimated_tokens: estimateTokens(agents),
+    estimated_tokens,
     reasoning: `Custom plan generated for objective. Selected agents based on required capabilities: ${requiredCapabilities.join(', ')}`
   };
 }
@@ -178,14 +181,18 @@ function analyzeObjective(objective: string): string[] {
 /**
  * Creates an agent spec with optimized prompt
  */
-function createAgentSpec(
+async function createAgentSpec(
   agentId: AgentId,
   objective: string,
   context?: ProjectContext
-): AgentSpec {
-  const spec = AGENT_CAPABILITIES[agentId];
+): Promise<AgentSpec> {
+  const spec = await getAgentSpec(agentId);
+  if (!spec) {
+    throw new Error(`Agent ${agentId} not found in registry`);
+  }
+
   const dependencies: string[] = [];
-  
+
   // Determine dependencies
   if (agentId === 'loveless' && objective.toLowerCase().includes('implement')) {
     dependencies.push('hollowed_eyes');
@@ -193,17 +200,17 @@ function createAgentSpec(
   if (agentId === 'hollowed_eyes' && objective.toLowerCase().includes('architecture')) {
     dependencies.push('the_architect');
   }
-  if (agentId === 'the_scribe' && (objective.toLowerCase().includes('implement') || 
+  if (agentId === 'the_scribe' && (objective.toLowerCase().includes('implement') ||
       objective.toLowerCase().includes('feature'))) {
     dependencies.push('hollowed_eyes');
   }
-  
+
   // Generate optimized prompt
-  const prompt = generatePrompt(agentId, objective, spec.specialization, context);
-  
+  const prompt = await generatePrompt(agentId, objective, spec.specialization, context);
+
   // Determine priority
   const priority = determinePriority(agentId, objective);
-  
+
   return {
     agent_id: agentId,
     task_description: `${spec.specialization.replace(/_/g, ' ')} for: ${objective}`,
@@ -216,28 +223,31 @@ function createAgentSpec(
 /**
  * Generates optimized prompt for an agent
  */
-function generatePrompt(
+async function generatePrompt(
   agentId: AgentId,
   objective: string,
   specialization: string,
   context?: ProjectContext
-): string {
-  const spec = AGENT_CAPABILITIES[agentId];
-  
+): Promise<string> {
+  const spec = await getAgentSpec(agentId);
+  if (!spec) {
+    throw new Error(`Agent ${agentId} not found in registry`);
+  }
+
   let prompt = `You are ${agentId}, specialist in ${specialization.replace(/_/g, ' ')}.\n\n`;
   prompt += `Objective: ${objective}\n\n`;
-  
+
   if (context?.project_type) {
     prompt += `Project Type: ${context.project_type}\n`;
   }
-  
+
   prompt += `\nYour responsibilities:\n`;
   for (const capability of spec.capabilities) {
     prompt += `- ${capability.replace(/_/g, ' ')}\n`;
   }
-  
+
   prompt += `\nFocus on your specialization and deliver high-quality work.`;
-  
+
   // Add specific guidance based on agent
   if (agentId === 'loveless') {
     prompt += `\n\nREMEMBER: You must verify thoroughly. Nothing broken ships on your watch.`;
@@ -246,7 +256,7 @@ function generatePrompt(
   } else if (agentId === 'the_architect') {
     prompt += `\n\nREMEMBER: Simplicity is sophisticated. Design for change, not perfection.`;
   }
-  
+
   return prompt;
 }
 

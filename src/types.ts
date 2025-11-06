@@ -1,19 +1,7 @@
 // Core types for mendicant orchestration
 
-export type AgentId = 
-  | "hollowed_eyes" 
-  | "the_architect" 
-  | "loveless" 
-  | "the_scribe" 
-  | "the_didact" 
-  | "zhadyz" 
-  | "the_curator" 
-  | "the_sentinel"
-  | "the_oracle"
-  | "the_librarian"
-  | "the_analyst"
-  | "cinna"
-  | "the_cartographer";
+// AgentId is now dynamic - accepts any string for custom agents
+export type AgentId = string;
 
 export type ExecutionStrategy = "sequential" | "parallel" | "phased";
 export type Priority = "critical" | "high" | "medium" | "low";
@@ -130,4 +118,32 @@ export interface ExecutionRecord {
   duration_ms: number;
   pattern_used?: string;
   verification_passed?: boolean;
+}
+
+// Dynamic agent learning types
+export interface LearnedAgent {
+  agent_id: AgentId;
+  discovered_at: number;
+  last_used: number;
+  total_executions: number;
+  successful_executions: number;
+  failed_executions: number;
+  avg_token_usage: number;
+  specialization?: string;
+  capabilities?: string[];
+  tools?: string[];
+  typical_use_cases?: string[];
+}
+
+export interface AgentFeedback {
+  agent_id: AgentId;
+  success: boolean;
+  tokens_used?: number;
+  duration_ms?: number;
+  error?: string;
+}
+
+export interface AgentDiscoveryContext {
+  available_agents?: AgentId[];
+  feedback?: AgentFeedback[];
 }

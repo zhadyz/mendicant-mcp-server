@@ -12,7 +12,8 @@ import {
 import { createPlan } from './planner.js';
 import { coordinateResults } from './coordinator.js';
 import { analyzeProject } from './analyzer.js';
-import type { ProjectContext, Constraints, AgentResult } from './types.js';
+import { agentRegistry } from './knowledge/agent_registry.js';
+import type { ProjectContext, Constraints, AgentResult, AgentFeedback } from './types.js';
 
 /**
  * Mendicant MCP Server
@@ -150,23 +151,23 @@ const TOOLS: Tool[] = [
           type: 'object',
           description: 'Project context for analysis',
           properties: {
-            git_status: { 
+            git_status: {
               type: 'string',
               description: 'Output of git status'
             },
-            test_results: { 
+            test_results: {
               type: 'object',
               description: 'Test results (passed, failed, total, coverage, etc.)'
             },
-            build_status: { 
+            build_status: {
               type: 'string',
               description: 'Build status (success, failure, warnings)'
             },
-            linear_issues: { 
+            linear_issues: {
               type: 'array',
               description: 'Array of Linear issues'
             },
-            recent_commits: { 
+            recent_commits: {
               type: 'array',
               description: 'Array of recent git commits'
             },
@@ -178,6 +179,64 @@ const TOOLS: Tool[] = [
         }
       },
       required: ['context']
+    }
+  },
+  {
+    name: 'mendicant_record_feedback',
+    description: 'Record feedback from agent execution for passive learning. The system learns from agent performance to improve future recommendations. Call this after agent execution with results.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: {
+          type: 'string',
+          description: 'ID of the agent that executed'
+        },
+        success: {
+          type: 'boolean',
+          description: 'Whether the agent succeeded'
+        },
+        tokens_used: {
+          type: 'number',
+          description: 'Tokens used by the agent'
+        },
+        duration_ms: {
+          type: 'number',
+          description: 'Execution time in milliseconds'
+        },
+        error: {
+          type: 'string',
+          description: 'Error message if agent failed'
+        }
+      },
+      required: ['agent_id', 'success']
+    }
+  },
+  {
+    name: 'mendicant_discover_agents',
+    description: 'Register newly discovered agents at runtime. Use this to teach the system about custom agents you have available.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of agent IDs to register'
+        }
+      },
+      required: ['agent_ids']
+    }
+  },
+  {
+    name: 'mendicant_list_learned_agents',
+    description: 'List all learned agents with their performance statistics. Shows both hardcoded defaults and dynamically discovered agents.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ranked: {
+          type: 'boolean',
+          description: 'Whether to rank by success rate (default: false)'
+        }
+      }
     }
   }
 ];
@@ -223,7 +282,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
           agent_results: AgentResult[];
         };
 
-        const coordination = coordinateResults(objective, agent_results);
+        const coordination = await coordinateResults(objective, agent_results);
 
         return {
           content: [
@@ -247,6 +306,60 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
             {
               type: 'text',
               text: JSON.stringify(analysis, null, 2)
+            }
+          ]
+        };
+      }
+
+      case 'mendicant_record_feedback': {
+        const feedback = args as unknown as AgentFeedback;
+
+        await agentRegistry.recordFeedback(feedback);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                message: `Feedback recorded for agent ${feedback.agent_id}`
+              })
+            }
+          ]
+        };
+      }
+
+      case 'mendicant_discover_agents': {
+        const { agent_ids } = args as unknown as { agent_ids: string[] };
+
+        await agentRegistry.discoverAgents(agent_ids);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                message: `Discovered ${agent_ids.length} agent(s): ${agent_ids.join(', ')}`,
+                agents: agent_ids
+              })
+            }
+          ]
+        };
+      }
+
+      case 'mendicant_list_learned_agents': {
+        const { ranked } = (args as unknown as { ranked?: boolean }) || {};
+
+        const agents = ranked
+          ? await agentRegistry.getRankedAgents()
+          : await agentRegistry.getAllAgents();
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(agents, null, 2)
             }
           ]
         };
