@@ -1,0 +1,92 @@
+import { agentRegistry } from './agent_registry.js';
+import { AGENT_CAPABILITIES } from './agent_capabilities.js';
+// Re-export for backwards compatibility
+export { AGENT_CAPABILITIES };
+export function selectAgents(requirements) {
+    const selected = new Set();
+    for (const requirement of requirements) {
+        const req = requirement.toLowerCase();
+        // Match agents based on capabilities and use cases
+        for (const [agentId, spec] of Object.entries(AGENT_CAPABILITIES)) {
+            const matches = spec.capabilities.some(cap => req.includes(cap.replace(/_/g, ' '))) ||
+                spec.typical_use_cases.some(useCase => req.includes(useCase.replace(/_/g, ' '))) ||
+                req.includes(spec.specialization.replace(/_/g, ' '));
+            if (matches) {
+                selected.add(agentId);
+            }
+        }
+    }
+    // Always include loveless for implementation tasks
+    if (selected.has('hollowed_eyes')) {
+        selected.add('loveless');
+    }
+    return Array.from(selected);
+}
+export function estimateTokens(agents) {
+    return agents.reduce((total, agentId) => {
+        return total + AGENT_CAPABILITIES[agentId].avg_token_usage;
+    }, 0);
+}
+/**
+ * Registry-aware version of selectAgents - uses learned agents + hardcoded defaults
+ */
+export async function selectAgentsFromRegistry(requirements) {
+    const allAgents = await agentRegistry.getAllAgents();
+    const selected = new Set();
+    console.error('[DEBUG] selectAgentsFromRegistry called');
+    console.error('[DEBUG] Requirements:', requirements);
+    console.error('[DEBUG] Number of agents loaded:', Object.keys(allAgents).length);
+    for (const requirement of requirements) {
+        const req = requirement.toLowerCase().replace(/_/g, ' ');
+        console.error('[DEBUG] Processing requirement:', requirement, '→', req);
+        // Match agents based on capabilities and use cases
+        for (const [agentId, spec] of Object.entries(allAgents)) {
+            const matches = spec.capabilities.some(cap => {
+                const normalizedCap = cap.toLowerCase().replace(/_/g, ' ');
+                const match = req.includes(normalizedCap) || normalizedCap.includes(req);
+                if (match) {
+                    console.error('[DEBUG] MATCH! Agent:', agentId, 'Capability:', cap, '→', normalizedCap);
+                }
+                return match;
+            }) ||
+                spec.typical_use_cases.some(useCase => {
+                    const normalizedUseCase = useCase.toLowerCase().replace(/_/g, ' ');
+                    const match = req.includes(normalizedUseCase) || normalizedUseCase.includes(req);
+                    if (match) {
+                        console.error('[DEBUG] MATCH! Agent:', agentId, 'Use case:', useCase, '→', normalizedUseCase);
+                    }
+                    return match;
+                }) ||
+                req.includes(spec.specialization.toLowerCase().replace(/_/g, ' '));
+            if (matches) {
+                selected.add(agentId);
+            }
+        }
+    }
+    console.error('[DEBUG] Selected agents:', Array.from(selected));
+    // Always include loveless for implementation tasks
+    if (selected.has('hollowed_eyes')) {
+        selected.add('loveless');
+    }
+    return Array.from(selected);
+}
+/**
+ * Registry-aware version of estimateTokens - uses learned token averages
+ */
+export async function estimateTokensFromRegistry(agents) {
+    let total = 0;
+    for (const agentId of agents) {
+        const agent = await agentRegistry.getAgent(agentId);
+        if (agent) {
+            total += agent.avg_token_usage;
+        }
+    }
+    return total;
+}
+/**
+ * Get agent spec from registry (with learned data merged in)
+ */
+export async function getAgentSpec(agentId) {
+    return await agentRegistry.getAgent(agentId);
+}
+//# sourceMappingURL=agent_specs.js.map
