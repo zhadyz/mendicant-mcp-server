@@ -2,13 +2,28 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { appendFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { createPlan } from './planner.js';
 import { coordinateResults } from './coordinator.js';
 import { analyzeProject } from './analyzer.js';
 import { agentRegistry } from './knowledge/agent_registry.js';
+// Debug: File-based logging
+const DEBUG_LOG = join(tmpdir(), 'mendicant-debug.log');
+function debugLog(msg) {
+    const timestamp = new Date().toISOString();
+    try {
+        appendFileSync(DEBUG_LOG, `${timestamp} ${msg}\n`);
+    }
+    catch (e) {
+        // Ignore write errors
+    }
+    console.error(msg);
+}
 // Debug: Module loading
-console.error('[DEBUG] index.ts module loading - START');
-console.error('[DEBUG] agentRegistry imported:', typeof agentRegistry);
+debugLog('[DEBUG] index.ts module loading - START');
+debugLog(`[DEBUG] agentRegistry imported: ${typeof agentRegistry}`);
 /**
  * Mendicant MCP Server
  *
@@ -353,8 +368,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
         switch (name) {
             case 'mendicant_plan': {
+                debugLog('[DEBUG] mendicant_plan tool called');
                 const { objective, context, constraints, past_executions } = args;
+                debugLog(`[DEBUG] objective: ${objective}`);
+                debugLog(`[DEBUG] context: ${JSON.stringify(context)}`);
                 const plan = await createPlan(objective, context, constraints, past_executions);
+                debugLog(`[DEBUG] plan created, agents: ${plan.agents.length}`);
+                debugLog(`[DEBUG] plan agents: ${JSON.stringify(plan.agents.map(a => a.agent_id))}`);
                 return {
                     content: [
                         {
@@ -506,16 +526,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
  * Start the server
  */
 async function main() {
-    console.error('[DEBUG] main() function called');
+    debugLog('[DEBUG] main() function called');
     const transport = new StdioServerTransport();
-    console.error('[DEBUG] StdioServerTransport created');
+    debugLog('[DEBUG] StdioServerTransport created');
     await server.connect(transport);
-    console.error('[DEBUG] Server connected to transport');
+    debugLog('[DEBUG] Server connected to transport');
     // Log to stderr so it doesn't interfere with MCP protocol on stdout
-    console.error('Mendicant MCP Server running on stdio');
-    console.error('[DEBUG] Checking agentRegistry getAllAgents at startup...');
+    debugLog('Mendicant MCP Server running on stdio');
+    debugLog('[DEBUG] Checking agentRegistry getAllAgents at startup...');
     const agents = await agentRegistry.getAllAgents();
-    console.error('[DEBUG] Agents at startup:', Object.keys(agents).length);
+    debugLog(`[DEBUG] Agents at startup: ${Object.keys(agents).length}`);
+    debugLog(`[DEBUG] Agent IDs: ${Object.keys(agents).join(', ')}`);
+    debugLog(`[DEBUG] Debug log file: ${DEBUG_LOG}`);
 }
 main().catch((error) => {
     console.error('Fatal error in main():', error);
