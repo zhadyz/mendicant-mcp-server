@@ -1,5 +1,8 @@
 import { agentRegistry } from './knowledge/agent_registry.js';
 import { mahoraga } from './knowledge/mahoraga.js';
+import { detectExecutionConflicts } from './knowledge/conflict_detector.js';
+import { memoryBridge } from './knowledge/memory_bridge.js';
+import { createMnemosyneEntities, createMnemosyneRelations } from './integration/mnemosyne_mcp.js';
 /**
  * Coordinates and synthesizes results from multiple agents
  *
@@ -19,8 +22,8 @@ export async function coordinateResults(objective, agentResults, plan, projectCo
     }
     // Synthesize successful outputs
     const synthesis = synthesizeOutputs(objective, agentResults);
-    // Detect conflicts
-    const conflicts = detectConflicts(agentResults);
+    // Detect conflicts using comprehensive conflict detector
+    const conflicts = detectExecutionConflicts(agentResults);
     // Identify gaps
     const gaps = identifyGaps(objective, agentResults);
     // Generate recommendations
@@ -59,14 +62,32 @@ function recordAgentFeedback(results) {
 }
 /**
  * Records complete execution pattern for Mahoraga adaptive learning
- * This captures the full context of what happened for future pattern matching
+ * AND consolidates to Mnemosyne for long-term persistent memory
+ *
+ * DUAL-LAYER MEMORY ARCHITECTURE:
+ * 1. Mahoraga (RAM) - Immediate, in-session learning
+ * 2. Memory Bridge → Mnemosyne (Persistent) - Long-term knowledge graph
  */
-function recordExecutionPattern(objective, plan, results, conflicts, gaps, projectContext) {
+async function recordExecutionPattern(objective, plan, results, conflicts, gaps, projectContext) {
     try {
+        // LAYER 1: Record to Mahoraga (RAM) for immediate learning
         mahoraga.recordExecution(objective, plan, results, conflicts, gaps, projectContext);
+        // LAYER 2: Consolidate to Mnemosyne (Persistent) via intelligent bridge
+        // The bridge decides if this memory is valuable enough to persist
+        const decision = await memoryBridge.consolidateExecutionPattern(objective, plan, results, conflicts, gaps, projectContext);
+        if (decision.should_persist) {
+            console.log(`[Memory Bridge] Persisting execution pattern: ${decision.score.reasoning}`);
+            // Persist to Mnemosyne knowledge graph
+            await createMnemosyneEntities(decision.entities_to_create);
+            await createMnemosyneRelations(decision.relations_to_create);
+            console.log(`[Memory Bridge] Successfully persisted ${decision.entities_to_create.length} entities and ${decision.relations_to_create.length} relations`);
+        }
+        else {
+            console.log(`[Memory Bridge] Skipping persistence (score: ${decision.score.value.toFixed(2)} < threshold)`);
+        }
     }
     catch (err) {
-        console.error('Failed to record execution pattern for Mahoraga:', err);
+        console.error('Failed to record execution pattern:', err);
     }
 }
 /**
@@ -180,54 +201,6 @@ function extractErrorMessage(output) {
         return errorMatch[1].trim();
     }
     return 'Unknown error';
-}
-/**
- * Detects conflicts between agent outputs
- */
-function detectConflicts(results) {
-    const conflicts = [];
-    // Check for architect vs implementation conflicts
-    const architect = results.find(r => r.agent_id === 'the_architect');
-    const implementation = results.find(r => r.agent_id === 'hollowed_eyes');
-    if (architect && implementation) {
-        // Look for mentions of different technologies
-        const archTechs = extractTechnologies(architect.output);
-        const implTechs = extractTechnologies(implementation.output);
-        const diffTechs = archTechs.filter(t => !implTechs.includes(t));
-        if (diffTechs.length > 0) {
-            conflicts.push({
-                agents: ['the_architect', 'hollowed_eyes'],
-                description: `Architecture specified ${diffTechs.join(', ')} but implementation may have used different approach`,
-                resolution: 'Verify implementation follows architecture design'
-            });
-        }
-    }
-    // Check for testing conflicts
-    const testing = results.find(r => r.agent_id === 'loveless');
-    if (testing && implementation) {
-        if (testing.output.toLowerCase().includes('fail') || testing.output.toLowerCase().includes('error')) {
-            conflicts.push({
-                agents: ['hollowed_eyes', 'loveless'],
-                description: 'Implementation has issues detected by testing',
-                resolution: 'hollowed_eyes should fix issues identified by loveless'
-            });
-        }
-    }
-    return conflicts;
-}
-/**
- * Extracts technology names from text
- */
-function extractTechnologies(text) {
-    const techs = [
-        'react', 'vue', 'angular', 'svelte',
-        'nextjs', 'nuxt', 'gatsby',
-        'typescript', 'javascript',
-        'tailwind', 'css', 'sass',
-        'postgres', 'mongodb', 'redis',
-        'express', 'fastapi', 'django'
-    ];
-    return techs.filter(tech => text.toLowerCase().includes(tech));
 }
 /**
  * Identifies gaps in what was delivered

@@ -44,6 +44,12 @@ export interface Constraints {
   max_agents?: number;
   prefer_parallel?: boolean;
   max_tokens?: number;
+  confidence_thresholds?: {
+    minimum_overall?: number;
+    warning_threshold?: number;
+    high_confidence?: number;
+    require_fallback_below?: number;
+  };
 }
 
 export interface AgentResult {

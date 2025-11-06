@@ -2,6 +2,14 @@ import { selectAgentsFromRegistry, estimateTokensFromRegistry, getAgentSpec } fr
 import { matchPattern } from './knowledge/patterns.js';
 import { findSimilarExecutions, shouldReusePattern, recommendAgents } from './integration/mnemosyne.js';
 import { mahoraga } from './knowledge/mahoraga.js';
+import { detectVagueRequest, shouldInvokeLibrarian } from './knowledge/vague_detector.js';
+import { analyzeObjectiveSemantic, getCapabilitiesFromAnalysis } from './knowledge/semantic_selector.js';
+import { checkMandatoryAgents, addMandatoryAgents } from './knowledge/mandatory_enforcer.js';
+import { enforceConstraints, validatePlan } from './knowledge/constraint_enforcer.js';
+import { detectPlanConflicts } from './knowledge/conflict_detector.js';
+import { memoryBridge } from './knowledge/memory_bridge.js';
+import { validateSafety, shouldBlockExecution } from './knowledge/safety_validator.js';
+import { validateConfidence, suggestFallbackAgents, getConfidenceMessage } from './knowledge/confidence_validator.js';
 /**
  * Creates an orchestration plan for a given objective
  *
@@ -11,9 +19,57 @@ import { mahoraga } from './knowledge/mahoraga.js';
  * 3. Generate custom plan if no pattern matches
  */
 export async function createPlan(objective, context, constraints, pastExecutions) {
-    // 1. Try to reuse a proven pattern from past executions
-    if (pastExecutions && pastExecutions.length > 0) {
-        const similarExecutions = findSimilarExecutions(objective, pastExecutions);
+    // 0. SAFETY VALIDATION - Check for dangerous/destructive objectives FIRST
+    const safetyAnalysis = validateSafety(objective);
+    if (shouldBlockExecution(safetyAnalysis)) {
+        // CRITICAL: Block execution immediately
+        throw new Error(`SAFETY VIOLATION: Objective blocked due to ${safetyAnalysis.threat_level} threat level.\n` +
+            `Detected threats:\n${safetyAnalysis.detected_threats.map(t => `  - [${t.severity.toUpperCase()}] ${t.type}: ${t.description}`).join('\n')}\n\n` +
+            `Recommendations:\n${safetyAnalysis.recommendations.map(r => `  - ${r}`).join('\n')}\n\n` +
+            `If this objective is legitimately authorized, please rephrase to be more specific and include authorization context.`);
+    }
+    // 0.5. VAGUE REQUEST DETECTION - Detect if objective is too vague and needs clarification
+    const vagueAnalysis = detectVagueRequest(objective);
+    if (shouldInvokeLibrarian(vagueAnalysis)) {
+        // Return a plan with the_librarian as mandatory first step
+        return {
+            agents: [{
+                    agent_id: 'the_librarian',
+                    task_description: 'Requirements clarification for vague objective',
+                    prompt: `The objective "${objective}" is too vague. Your role:\n- Ask clarifying questions to understand user intent\n- Identify missing details: ${vagueAnalysis.missing_context.join(', ')}\n- Expand into specific, actionable requirements\n\nVagueness indicators: ${vagueAnalysis.vagueness_indicators.join(', ')}\nSuggested clarifications: ${vagueAnalysis.suggested_clarifications.join(', ')}`,
+                    dependencies: [],
+                    priority: 'critical'
+                }],
+            execution_strategy: 'sequential',
+            success_criteria: 'User provides clear, detailed requirements',
+            estimated_tokens: 15000,
+            reasoning: `Objective too vague (confidence: ${(vagueAnalysis.confidence * 100).toFixed(0)}%). the_librarian invoked for requirements gathering before planning.`
+        };
+    }
+    // 0.5. LONG-TERM MEMORY RETRIEVAL - Query Mnemosyne for relevant past patterns
+    // This loads successful patterns from persistent storage into working memory
+    let mnemosynePatterns = [];
+    try {
+        const semantic = analyzeObjectiveSemantic(objective);
+        mnemosynePatterns = await memoryBridge.retrieveRelevantPatterns({
+            objective,
+            project_context: context,
+            intent: semantic.intent,
+            domain: semantic.domain,
+            limit: 5
+        });
+        if (mnemosynePatterns.length > 0) {
+            console.log(`[Memory Bridge] Retrieved ${mnemosynePatterns.length} relevant patterns from Mnemosyne`);
+        }
+    }
+    catch (err) {
+        console.error('[Memory Bridge] Failed to retrieve patterns from Mnemosyne:', err);
+    }
+    // Combine Mnemosyne patterns with provided pastExecutions
+    const allPastExecutions = [...(pastExecutions || []), ...mnemosynePatterns];
+    // 1. Try to reuse a proven pattern from past executions (RAM + Mnemosyne)
+    if (allPastExecutions && allPastExecutions.length > 0) {
+        const similarExecutions = findSimilarExecutions(objective, allPastExecutions);
         for (const pastExec of similarExecutions) {
             if (shouldReusePattern(pastExec, objective)) {
                 return {
@@ -39,10 +95,13 @@ export async function createPlan(objective, context, constraints, pastExecutions
  * Generates a custom orchestration plan from scratch
  */
 async function generateCustomPlan(objective, context, constraints, pastExecutions) {
-    // Analyze objective to determine required capabilities
-    const requiredCapabilities = analyzeObjective(objective);
-    // Select agents based on capabilities (using registry)
-    let agents = await selectAgentsFromRegistry(requiredCapabilities);
+    // SEMANTIC ANALYSIS - Analyze objective using intelligent semantic selection
+    const semanticAnalysis = analyzeObjectiveSemantic(objective);
+    const requiredCapabilities = getCapabilitiesFromAnalysis(semanticAnalysis);
+    // Start with semantically recommended agents (high confidence)
+    let agents = semanticAnalysis.recommended_agents.length > 0
+        ? semanticAnalysis.recommended_agents
+        : await selectAgentsFromRegistry(requiredCapabilities);
     // Consider recommendations from past executions
     if (pastExecutions && pastExecutions.length > 0) {
         const recommended = recommendAgents(objective, pastExecutions);
@@ -57,12 +116,13 @@ async function generateCustomPlan(objective, context, constraints, pastExecution
     agents = predictiveScores
         .sort((a, b) => b.predicted_success_rate - a.predicted_success_rate)
         .map(score => score.agent_id);
-    // Apply constraints
-    if (constraints?.max_agents && agents.length > constraints.max_agents) {
-        agents = agents.slice(0, constraints.max_agents);
-    }
     // Create agent specs with prompts (async now)
-    const agentSpecs = await Promise.all(agents.map(agentId => createAgentSpec(agentId, objective, context)));
+    let agentSpecs = await Promise.all(agents.map(agentId => createAgentSpec(agentId, objective, context)));
+    // MANDATORY AGENT ENFORCEMENT - Ensure critical agents are included
+    const mandatoryChecks = await checkMandatoryAgents(objective, agentSpecs, context);
+    if (mandatoryChecks.length > 0) {
+        agentSpecs = await addMandatoryAgents(agentSpecs, mandatoryChecks, objective, context);
+    }
     // Determine execution strategy
     const execution_strategy = determineExecutionStrategy(agentSpecs, constraints);
     // Build phases if phased execution
@@ -70,15 +130,89 @@ async function generateCustomPlan(objective, context, constraints, pastExecution
         ? buildPhases(agentSpecs)
         : undefined;
     // Estimate tokens using registry
-    const estimated_tokens = await estimateTokensFromRegistry(agents);
-    // Build reasoning with Mahoraga insights
-    let reasoning = `Custom plan generated for objective. Selected agents based on required capabilities: ${requiredCapabilities.join(', ')}.`;
+    let estimated_tokens = await estimateTokensFromRegistry(agentSpecs.map(a => a.agent_id));
+    // CONFLICT DETECTION - Check for plan conflicts before execution
+    const conflictAnalysis = detectPlanConflicts(agentSpecs);
+    if (!conflictAnalysis.safe_to_execute) {
+        // Add conflict warnings to reasoning
+        const conflictMessages = conflictAnalysis.conflicts.map(c => c.description).join('; ');
+        throw new Error(`Plan has conflicts that must be resolved: ${conflictMessages}`);
+    }
+    // CONSTRAINT ENFORCEMENT - Rigorously enforce constraints
+    const enforcement = enforceConstraints(agentSpecs, estimated_tokens, constraints);
+    if (!enforcement.compliant) {
+        // Auto-fix violations if possible
+        if (enforcement.adjusted_agents && enforcement.adjusted_estimated_tokens) {
+            agentSpecs = enforcement.adjusted_agents;
+            estimated_tokens = enforcement.adjusted_estimated_tokens;
+            // Log what was adjusted
+            const violationMessages = enforcement.violations.map(v => v.message).join('; ');
+            console.warn(`[CONSTRAINT ENFORCEMENT] Auto-adjusted plan to meet constraints: ${violationMessages}`);
+        }
+        else {
+            // If can't auto-fix, throw error
+            const violationMessages = enforcement.violations.map(v => v.message).join('; ');
+            throw new Error(`Plan violates constraints: ${violationMessages}`);
+        }
+    }
+    // Validate plan safety
+    const validation = validatePlan(agentSpecs, estimated_tokens, constraints);
+    if (!validation.safe && validation.warnings.length > 0) {
+        console.warn(`[PLAN VALIDATION] Warnings: ${validation.warnings.join('; ')}`);
+    }
+    // CONFIDENCE VALIDATION - Validate overall confidence before execution
+    const mahoragaTopConfidence = predictiveScores.length > 0 ? predictiveScores[0].confidence : undefined;
+    const confidenceAnalysis = validateConfidence({
+        agents: agentSpecs,
+        execution_strategy,
+        phases,
+        success_criteria: deriveSuccessCriteria(objective),
+        estimated_tokens,
+        reasoning: '' // Will be filled below
+    }, semanticAnalysis.confidence, mahoragaTopConfidence, undefined, // No pattern confidence for custom plans
+    constraints?.confidence_thresholds);
+    // Check if confidence is too low
+    if (!confidenceAnalysis.should_execute) {
+        // Low confidence - suggest fallback agents
+        const fallbackAgents = suggestFallbackAgents(confidenceAnalysis.overall_confidence, {
+            agents: agentSpecs,
+            execution_strategy,
+            success_criteria: deriveSuccessCriteria(objective),
+            estimated_tokens,
+            reasoning: ''
+        });
+        if (fallbackAgents.length > 0) {
+            console.warn(`[CONFIDENCE VALIDATION] Low confidence (${(confidenceAnalysis.overall_confidence * 100).toFixed(0)}%) - Adding fallback agents: ${fallbackAgents.join(', ')}`);
+            // Add fallback agents to plan
+            for (const fallbackId of fallbackAgents) {
+                const fallbackSpec = await createAgentSpec(fallbackId, objective, context);
+                agentSpecs.unshift(fallbackSpec); // Add at beginning
+            }
+            // Recalculate estimated tokens
+            estimated_tokens = await estimateTokensFromRegistry(agentSpecs.map(a => a.agent_id));
+        }
+        else {
+            // No fallback agents available - throw error with recommendations
+            throw new Error(`CONFIDENCE TOO LOW: Plan confidence is ${(confidenceAnalysis.overall_confidence * 100).toFixed(0)}%, below minimum threshold.\n\n` +
+                `Confidence Level: ${confidenceAnalysis.confidence_level}\n` +
+                `Warnings:\n${confidenceAnalysis.warnings.map(w => `  - ${w}`).join('\n')}\n\n` +
+                `Recommendations:\n${confidenceAnalysis.recommendations.map(r => `  - ${r}`).join('\n')}`);
+        }
+    }
+    // Build reasoning with Mahoraga insights and semantic analysis
+    let reasoning = `Custom plan generated for objective. Semantic analysis: Intent=${semanticAnalysis.intent}, Domain=${semanticAnalysis.domain}, TaskType=${semanticAnalysis.task_type}, Confidence=${(semanticAnalysis.confidence * 100).toFixed(0)}%. ${semanticAnalysis.reasoning}. ${getConfidenceMessage(confidenceAnalysis)}`;
     if (predictiveScores.length > 0) {
         const topAgent = predictiveScores[0];
         reasoning += ` Mahoraga predictive intelligence ranked agents by success probability. Top agent: ${topAgent.agent_id} (${(topAgent.predicted_success_rate * 100).toFixed(0)}% predicted success, confidence: ${(topAgent.confidence * 100).toFixed(0)}%).`;
         if (topAgent.historical_performance.similar_objectives > 0) {
             reasoning += ` Based on ${topAgent.historical_performance.similar_objectives} similar past executions.`;
         }
+    }
+    if (mandatoryChecks.length > 0) {
+        reasoning += ` Mandatory agents enforced: ${mandatoryChecks.map(c => c.agent_id).join(', ')}.`;
+    }
+    if (conflictAnalysis.warnings.length > 0) {
+        reasoning += ` Warnings: ${conflictAnalysis.warnings.map(w => w.description).join('; ')}.`;
     }
     return {
         agents: agentSpecs,

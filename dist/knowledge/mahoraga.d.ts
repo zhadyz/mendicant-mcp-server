@@ -84,12 +84,23 @@ export declare class AdaptivePlanner {
     constructor(memory: MahoragaMemory, failureAnalyzer: FailureAnalyzer);
     /**
      * Refine a failed plan based on learned patterns
+     * NOW WITH ADAPTIVE CREATIVITY - adjusts strategy based on confidence
      */
     refinePlan(originalPlan: OrchestrationPlan, failureContext: FailureContext, objective: string, projectContext?: ProjectContext): AdaptiveRefinement;
     private determinePlanChanges;
     private findCommonAgents;
     private applyChanges;
     private calculateRefinementConfidence;
+    /**
+     * AGGRESSIVE REFINEMENT - When confidence is low, get creative
+     * This is where Mahoraga truly adapts like its namesake
+     */
+    private generateAggressiveRefinement;
+    /**
+     * HYBRID APPROACH - Mix successful patterns from different domains
+     * When we have some data but not enough, cross-pollinate
+     */
+    private hybridizePatterns;
     private generateRefinementReasoning;
 }
 /**
@@ -100,7 +111,13 @@ export declare class MahoragaEngine {
     private predictor;
     private analyzer;
     private planner;
+    private isBootstrapped;
     constructor();
+    /**
+     * Initialize Mahoraga with bootstrap data if memory is empty
+     * This solves the cold-start problem by providing synthetic training data
+     */
+    private ensureBootstrapped;
     /**
      * Record execution for learning
      */

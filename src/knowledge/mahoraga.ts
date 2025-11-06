@@ -25,6 +25,8 @@ import type {
   Conflict,
   Gap
 } from '../types.js';
+import { classifyError as classifyErrorEnhanced, getContextualAdvice } from './error_classifier.js';
+import { generateBootstrapPatterns } from './bootstrap.js';
 
 /**
  * Mahoraga's memory - stores and retrieves execution patterns
@@ -147,13 +149,9 @@ export class MahoragaMemory {
   }
 
   private classifyError(output: string): string {
-    const lower = output.toLowerCase();
-    if (lower.includes('timeout')) return 'timeout';
-    if (lower.includes('compilation') || lower.includes('syntax')) return 'compilation_error';
-    if (lower.includes('test') && lower.includes('fail')) return 'test_failure';
-    if (lower.includes('permission') || lower.includes('access')) return 'permission_error';
-    if (lower.includes('not found') || lower.includes('missing')) return 'missing_dependency';
-    return 'unknown';
+    // Use comprehensive error classification with contextual advice
+    const classification = classifyErrorEnhanced(output);
+    return classification.category;
   }
 
   private generateAvoidanceRule(pattern: ExecutionPattern, failedResult: AgentResult): string {
@@ -386,6 +384,9 @@ export class FailureAnalyzer {
     precedingAgents: AgentId[],
     projectContext?: ProjectContext
   ): FailureContext {
+    // Get comprehensive error classification with contextual advice
+    const errorClassification = classifyErrorEnhanced(error);
+
     // Get similar failures
     const allFailures = this.memory.getFailures(failedAgentId);
     const similarFailures = allFailures.filter(f =>
@@ -400,20 +401,30 @@ export class FailureAnalyzer {
       projectContext
     );
 
-    // Suggest fix based on pattern
-    const suggestedFix = this.suggestFix(
+    // Suggest fix based on pattern and enhanced classification
+    let suggestedFix = this.suggestFix(
       failedAgentId,
       error,
       precedingAgents,
       similarFailures
     );
 
+    // Enhance with contextual advice from error classifier
+    if (errorClassification.suggested_fix && errorClassification.confidence >= 0.7) {
+      suggestedFix = `${suggestedFix} | Enhanced: ${errorClassification.suggested_fix}`;
+    }
+
+    // Add related agent if available
+    if (errorClassification.related_agent) {
+      suggestedFix = `${suggestedFix} | Consider involving: ${errorClassification.related_agent}`;
+    }
+
     return {
       pattern_id: `failure_${Date.now()}`,
       objective,
       failed_agent: failedAgentId,
       error_message: error,
-      error_type: this.classifyError(error),
+      error_type: errorClassification.category,
       preceding_agents: precedingAgents,
       project_context: projectContext,
       attempted_dependencies: precedingAgents,
@@ -443,13 +454,9 @@ export class FailureAnalyzer {
   }
 
   private classifyError(error: string): string {
-    const lower = error.toLowerCase();
-    if (lower.includes('timeout')) return 'timeout';
-    if (lower.includes('compilation') || lower.includes('syntax')) return 'compilation_error';
-    if (lower.includes('test') && lower.includes('fail')) return 'test_failure';
-    if (lower.includes('permission')) return 'permission_error';
-    if (lower.includes('not found') || lower.includes('missing')) return 'missing_dependency';
-    return 'unknown';
+    // Use comprehensive error classification with contextual advice
+    const classification = classifyErrorEnhanced(error);
+    return classification.category;
   }
 
   private generateAvoidanceRule(
@@ -541,6 +548,7 @@ export class AdaptivePlanner {
 
   /**
    * Refine a failed plan based on learned patterns
+   * NOW WITH ADAPTIVE CREATIVITY - adjusts strategy based on confidence
    */
   refinePlan(
     originalPlan: OrchestrationPlan,
@@ -553,25 +561,50 @@ export class AdaptivePlanner {
       .findSimilarPatterns(objective, projectContext, 10)
       .filter(m => m.pattern.success);
 
-    // Determine what needs to change
-    const suggestedChanges = this.determinePlanChanges(
-      originalPlan,
-      failureContext,
-      successfulPatterns
-    );
+    // Calculate confidence FIRST to determine strategy
+    const confidence = this.calculateRefinementConfidence(successfulPatterns, failureContext);
+
+    // ADAPTIVE STRATEGY SELECTION based on confidence
+    let suggestedChanges: AdaptiveRefinement['suggested_changes'];
+    let strategyUsed: string;
+
+    if (confidence < 0.3) {
+      // LOW CONFIDENCE → AGGRESSIVE EXPERIMENTAL REFINEMENT
+      suggestedChanges = this.generateAggressiveRefinement(
+        originalPlan,
+        failureContext,
+        objective,
+        projectContext
+      );
+      strategyUsed = 'aggressive_experimental';
+    } else if (confidence < 0.7) {
+      // MEDIUM CONFIDENCE → HYBRID PATTERN MIXING
+      suggestedChanges = this.hybridizePatterns(
+        successfulPatterns,
+        originalPlan,
+        failureContext
+      );
+      strategyUsed = 'hybrid_cross_pollination';
+    } else {
+      // HIGH CONFIDENCE → CONSERVATIVE REFINEMENT
+      suggestedChanges = this.determinePlanChanges(
+        originalPlan,
+        failureContext,
+        successfulPatterns
+      );
+      strategyUsed = 'conservative_evidence_based';
+    }
 
     // Generate refined plan
     const refinedPlan = this.applyChanges(originalPlan, suggestedChanges);
 
-    // Calculate confidence
-    const confidence = this.calculateRefinementConfidence(successfulPatterns, failureContext);
-
-    // Generate reasoning
-    const reasoning = this.generateRefinementReasoning(
-      suggestedChanges,
-      failureContext,
-      successfulPatterns
-    );
+    // Generate reasoning with strategy context
+    const reasoning = `[Strategy: ${strategyUsed}, Confidence: ${(confidence * 100).toFixed(0)}%] ` +
+      this.generateRefinementReasoning(
+        suggestedChanges,
+        failureContext,
+        successfulPatterns
+      );
 
     return {
       original_plan: originalPlan,
@@ -673,6 +706,138 @@ export class AdaptivePlanner {
     return successfulPatterns.length / 5;
   }
 
+  /**
+   * AGGRESSIVE REFINEMENT - When confidence is low, get creative
+   * This is where Mahoraga truly adapts like its namesake
+   */
+  private generateAggressiveRefinement(
+    plan: OrchestrationPlan,
+    failure: FailureContext,
+    objective: string,
+    projectContext?: ProjectContext
+  ): AdaptiveRefinement['suggested_changes'] {
+    const changes: AdaptiveRefinement['suggested_changes'] = {
+      agents_to_add: [],
+      agents_to_remove: [],
+      agents_to_reorder: [],
+      dependency_changes: []
+    };
+
+    console.log('[Mahoraga] Low confidence detected - engaging AGGRESSIVE REFINEMENT');
+
+    // Strategy 1: Cross-domain learning - look at ALL successful patterns regardless of similarity
+    const allPatterns = Array.from(this.memory['patterns'].values())
+      .filter(p => p.success);
+
+    if (allPatterns.length > 0) {
+      // Find agents that frequently appear in successful executions
+      const agentFrequency = new Map<AgentId, number>();
+      for (const pattern of allPatterns) {
+        for (const agent of pattern.agents_used) {
+          agentFrequency.set(agent, (agentFrequency.get(agent) || 0) + 1);
+        }
+      }
+
+      // Get top 3 most successful agents not in current plan
+      const currentAgents = plan.agents.map(a => a.agent_id);
+      const topAgents = Array.from(agentFrequency.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([agent]) => agent)
+        .filter(agent => !currentAgents.includes(agent))
+        .slice(0, 3);
+
+      changes.agents_to_add.push(...topAgents);
+    }
+
+    // Strategy 2: Add exploratory agents for uncertain situations
+    if (!plan.agents.some(a => a.agent_id === 'the_didact')) {
+      changes.agents_to_add.push('the_didact'); // Research when uncertain
+    }
+
+    if (!plan.agents.some(a => a.agent_id === 'the_oracle')) {
+      changes.agents_to_add.push('the_oracle'); // Strategic validation
+    }
+
+    // Strategy 3: Error-specific experimental additions
+    if (failure.error_type === 'unknown' || failure.error_type === 'compilation_error') {
+      // Add architect for complex problems
+      if (!plan.agents.some(a => a.agent_id === 'the_architect')) {
+        changes.agents_to_add.push('the_architect');
+      }
+    }
+
+    if (failure.error_type === 'test_failure') {
+      // Add more verification layers
+      if (!plan.agents.some(a => a.agent_id === 'the_scribe')) {
+        changes.agents_to_add.push('the_scribe'); // Better docs might help tests
+      }
+    }
+
+    // Strategy 4: Remove failed agent if it failed multiple times
+    const pastFailures = this.memory.getFailures(failure.failed_agent);
+    if (pastFailures.length >= 2) { // More aggressive than before (was 3)
+      changes.agents_to_remove.push(failure.failed_agent);
+      console.log(`[Mahoraga] Removing ${failure.failed_agent} - failed ${pastFailures.length} times`);
+    }
+
+    // Strategy 5: Parallel execution optimization is implicit in phased strategies
+    // The refined plan will use phased execution when appropriate
+
+    return changes;
+  }
+
+  /**
+   * HYBRID APPROACH - Mix successful patterns from different domains
+   * When we have some data but not enough, cross-pollinate
+   */
+  private hybridizePatterns(
+    successfulPatterns: PatternMatch[],
+    plan: OrchestrationPlan,
+    failure: FailureContext
+  ): AdaptiveRefinement['suggested_changes'] {
+    const changes: AdaptiveRefinement['suggested_changes'] = {
+      agents_to_add: [],
+      agents_to_remove: [],
+      agents_to_reorder: [],
+      dependency_changes: []
+    };
+
+    console.log('[Mahoraga] Medium confidence - hybridizing successful patterns');
+
+    // Take agents from top 3 most similar successful patterns
+    const topPatterns = successfulPatterns.slice(0, 3);
+    const agentCombinations = new Set<AgentId>();
+
+    for (const match of topPatterns) {
+      for (const agent of match.pattern.agents_used) {
+        agentCombinations.add(agent);
+      }
+    }
+
+    // Add agents that appear in successful patterns but not in failed plan
+    const currentAgents = plan.agents.map(a => a.agent_id);
+    for (const agent of agentCombinations) {
+      if (!currentAgents.includes(agent)) {
+        changes.agents_to_add.push(agent);
+      }
+    }
+
+    // If still low number of additions, be more aggressive
+    if (changes.agents_to_add.length < 2) {
+      // Add verification if missing
+      if (!agentCombinations.has('loveless')) {
+        changes.agents_to_add.push('loveless');
+      }
+
+      // Add research if complex
+      if (!agentCombinations.has('the_didact') && failure.error_type !== 'test_failure') {
+        changes.agents_to_add.push('the_didact');
+      }
+    }
+
+    return changes;
+  }
+
   private generateRefinementReasoning(
     changes: AdaptiveRefinement['suggested_changes'],
     failure: FailureContext,
@@ -703,11 +868,37 @@ export class MahoragaEngine {
   private analyzer: FailureAnalyzer;
   private planner: AdaptivePlanner;
 
+  private isBootstrapped: boolean = false;
+
   constructor() {
     this.memory = new MahoragaMemory();
     this.predictor = new PredictiveSelector(this.memory);
     this.analyzer = new FailureAnalyzer(this.memory);
     this.planner = new AdaptivePlanner(this.memory, this.analyzer);
+  }
+
+  /**
+   * Initialize Mahoraga with bootstrap data if memory is empty
+   * This solves the cold-start problem by providing synthetic training data
+   */
+  private ensureBootstrapped(): void {
+    if (this.isBootstrapped) return;
+
+    // Check if memory is empty (cold-start)
+    const hasPatterns = this.memory['patterns'].size > 0;
+
+    if (!hasPatterns) {
+      console.log('[Mahoraga] Cold-start detected. Loading bootstrap patterns...');
+      const bootstrapPatterns = generateBootstrapPatterns(100);
+
+      for (const pattern of bootstrapPatterns) {
+        this.memory.recordPattern(pattern);
+      }
+
+      console.log(`[Mahoraga] Loaded ${bootstrapPatterns.length} bootstrap patterns. Ready for adaptive intelligence.`);
+    }
+
+    this.isBootstrapped = true;
   }
 
   /**
@@ -751,6 +942,7 @@ export class MahoragaEngine {
     objective: string,
     projectContext?: ProjectContext
   ): PredictiveScore[] {
+    this.ensureBootstrapped();
     return this.predictor.predictAgentSuccess(agents, objective, projectContext);
   }
 
@@ -776,6 +968,7 @@ export class MahoragaEngine {
     objective: string,
     projectContext?: ProjectContext
   ): AdaptiveRefinement {
+    this.ensureBootstrapped();
     return this.planner.refinePlan(originalPlan, failureContext, objective, projectContext);
   }
 
@@ -787,6 +980,7 @@ export class MahoragaEngine {
     projectContext?: ProjectContext,
     limit?: number
   ): PatternMatch[] {
+    this.ensureBootstrapped();
     return this.memory
       .findSimilarPatterns(objective, projectContext, limit)
       .filter(m => m.pattern.success);

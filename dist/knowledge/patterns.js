@@ -1,3 +1,5 @@
+import { analyzeObjectiveSemantic } from './semantic_selector.js';
+import { detectVagueRequest, shouldInvokeLibrarian } from './vague_detector.js';
 export const COMMON_PATTERNS = {
     SCAFFOLD: {
         name: "Project Scaffolding",
@@ -423,28 +425,57 @@ Report final status and confirm bug is resolved.`,
     }
 };
 export function matchPattern(objective) {
+    // Check if objective is too vague first
+    const vagueAnalysis = detectVagueRequest(objective);
+    if (shouldInvokeLibrarian(vagueAnalysis)) {
+        return null; // Let vague detection in planner handle this
+    }
+    // Use semantic analysis for intelligent pattern matching
+    const semantic = analyzeObjectiveSemantic(objective);
     const lower = objective.toLowerCase();
-    // Pattern matching with keywords
-    if (lower.includes("scaffold") || lower.includes("setup") || lower.includes("initialize")) {
+    // CREATIVE/RESEARCH domains should NOT match technical patterns
+    // e.g., "write a haiku about security" is creative, not a security fix
+    if (semantic.domain === 'creative' || semantic.domain === 'research') {
+        return null; // Creative/research tasks don't match patterns
+    }
+    // SCAFFOLD: Only for actual project setup (create_new intent + code/architecture domain)
+    if (semantic.intent === 'create_new' &&
+        (semantic.domain === 'code' || semantic.domain === 'architecture') &&
+        (lower.includes("scaffold") || lower.includes("setup") || lower.includes("initialize"))) {
         return COMMON_PATTERNS.SCAFFOLD;
     }
-    if ((lower.includes("fix") || lower.includes("repair")) && lower.includes("test")) {
+    // FIX_TESTS: Only for fixing test failures (fix_issue intent + testing domain)
+    if (semantic.intent === 'fix_issue' &&
+        semantic.domain === 'testing' &&
+        (lower.includes("test") || lower.includes("spec"))) {
         return COMMON_PATTERNS.FIX_TESTS;
     }
-    if (lower.includes("security") || lower.includes("vulnerability") || lower.includes("exploit")) {
+    // SECURITY_FIX: Only for actual security work (security domain + fix/investigate intent)
+    if (semantic.domain === 'security' &&
+        (semantic.intent === 'fix_issue' || semantic.intent === 'investigate') &&
+        (lower.includes("security") || lower.includes("vulnerability") || lower.includes("exploit"))) {
         return COMMON_PATTERNS.SECURITY_FIX;
     }
-    if (lower.includes("deploy") || lower.includes("release") || lower.includes("publish")) {
+    // DEPLOYMENT: Only for actual deployments (deploy intent + infrastructure domain)
+    if (semantic.intent === 'deploy' &&
+        (semantic.domain === 'infrastructure' || semantic.domain === 'code') &&
+        (lower.includes("deploy") || lower.includes("release") || lower.includes("publish"))) {
         return COMMON_PATTERNS.DEPLOYMENT;
     }
-    if ((lower.includes("implement") || lower.includes("add") || lower.includes("create")) &&
+    // FEATURE_IMPLEMENTATION: Only for new features (create_new intent + code domain)
+    if (semantic.intent === 'create_new' &&
+        semantic.domain === 'code' &&
         (lower.includes("feature") || lower.includes("functionality"))) {
         return COMMON_PATTERNS.FEATURE_IMPLEMENTATION;
     }
-    if ((lower.includes("fix") || lower.includes("bug") || lower.includes("error")) &&
+    // BUG_FIX: Only for bug fixes (fix_issue intent + code domain)
+    if (semantic.intent === 'fix_issue' &&
+        semantic.domain === 'code' &&
+        (lower.includes("bug") || lower.includes("error") || lower.includes("fix")) &&
         !lower.includes("test")) {
         return COMMON_PATTERNS.BUG_FIX;
     }
+    // No pattern matched - let custom agent selection handle it
     return null;
 }
 //# sourceMappingURL=patterns.js.map
