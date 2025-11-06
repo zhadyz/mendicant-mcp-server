@@ -1,24 +1,16 @@
 # MCP Server Setup for Claude Code
 
-## Installation Steps
+## Quick Start (Recommended)
 
-### 1. Verify Server is Built
+### GitHub Installation
 
-```bash
-cd C:\Users\eclip\Desktop\MENDICANT\mendicant-mcp-server
-ls dist/  # Should see index.js and other compiled files
-```
+The easiest way to install the mendicant MCP server is directly from GitHub:
 
-### 2. Locate Claude Code MCP Config
+**1. Locate your Claude Code config file:**
 
 **Windows:**
 ```
 %APPDATA%\Claude\claude_desktop_config.json
-```
-
-**Full path:**
-```
-C:\Users\eclip\AppData\Roaming\Claude\claude_desktop_config.json
 ```
 
 **macOS:**
@@ -26,9 +18,57 @@ C:\Users\eclip\AppData\Roaming\Claude\claude_desktop_config.json
 ~/Library/Application Support/Claude/claude_desktop_config.json
 ```
 
-### 3. Add mendicant Server to Config
+**2. Add to your config:**
 
-Open the config file and add the mendicant server:
+```json
+{
+  "mcpServers": {
+    "mendicant": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "github:zhadyz/mendicant-mcp-server"
+      ]
+    }
+  }
+}
+```
+
+**3. Restart Claude Code completely:**
+- Close all windows
+- Exit from system tray
+- Relaunch
+
+**4. Verify it works:**
+Ask Claude Code: `Can you list your available MCP tools?`
+
+You should see:
+- `mcp__mendicant__mendicant_plan`
+- `mcp__mendicant__mendicant_coordinate`
+- `mcp__mendicant__mendicant_analyze`
+
+That's it! ✅
+
+---
+
+## Alternative: Local Installation
+
+If you prefer to run from a local copy:
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/zhadyz/mendicant-mcp-server.git
+cd mendicant-mcp-server
+npm install
+npm run build
+```
+
+### 2. Locate Claude Code MCP Config
+
+### 3. Add to Config
+
+Use the **absolute path** to your cloned repository:
 
 ```json
 {
@@ -36,19 +76,30 @@ Open the config file and add the mendicant server:
     "mendicant": {
       "command": "node",
       "args": [
-        "C:\\Users\\eclip\\Desktop\\MENDICANT\\mendicant-mcp-server\\dist\\index.js"
+        "/absolute/path/to/mendicant-mcp-server/dist/index.js"
       ]
     }
   }
 }
 ```
 
-**Important Notes:**
-- Use double backslashes (`\\`) in Windows paths
-- Or use forward slashes: `C:/Users/eclip/Desktop/MENDICANT/mendicant-mcp-server/dist/index.js`
-- The config file may already have other MCP servers - just add mendicant to the `mcpServers` object
+**Windows example:**
+```json
+{
+  "mcpServers": {
+    "mendicant": {
+      "command": "node",
+      "args": [
+        "C:/Users/YourName/projects/mendicant-mcp-server/dist/index.js"
+      ]
+    }
+  }
+}
+```
 
-### 4. Complete Config Example
+**Important:** Use forward slashes `/` or double backslashes `\\` in Windows paths.
+
+### 4. Multiple Servers Example
 
 If you have other MCP servers already configured:
 
