@@ -46,14 +46,20 @@ export async function selectAgentsFromRegistry(requirements: string[]): Promise<
   const selected = new Set<AgentId>();
 
   for (const requirement of requirements) {
-    const req = requirement.toLowerCase();
+    const req = requirement.toLowerCase().replace(/_/g, ' ');
 
     // Match agents based on capabilities and use cases
     for (const [agentId, spec] of Object.entries(allAgents)) {
       const matches =
-        spec.capabilities.some(cap => req.includes(cap.replace(/_/g, ' '))) ||
-        spec.typical_use_cases.some(useCase => req.includes(useCase.replace(/_/g, ' '))) ||
-        req.includes(spec.specialization.replace(/_/g, ' '));
+        spec.capabilities.some(cap => {
+          const normalizedCap = cap.toLowerCase().replace(/_/g, ' ');
+          return req.includes(normalizedCap) || normalizedCap.includes(req);
+        }) ||
+        spec.typical_use_cases.some(useCase => {
+          const normalizedUseCase = useCase.toLowerCase().replace(/_/g, ' ');
+          return req.includes(normalizedUseCase) || normalizedUseCase.includes(req);
+        }) ||
+        req.includes(spec.specialization.toLowerCase().replace(/_/g, ' '));
 
       if (matches) {
         selected.add(agentId as AgentId);
