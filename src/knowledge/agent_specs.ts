@@ -45,19 +45,32 @@ export async function selectAgentsFromRegistry(requirements: string[]): Promise<
   const allAgents = await agentRegistry.getAllAgents();
   const selected = new Set<AgentId>();
 
+  console.error('[DEBUG] selectAgentsFromRegistry called');
+  console.error('[DEBUG] Requirements:', requirements);
+  console.error('[DEBUG] Number of agents loaded:', Object.keys(allAgents).length);
+
   for (const requirement of requirements) {
     const req = requirement.toLowerCase().replace(/_/g, ' ');
+    console.error('[DEBUG] Processing requirement:', requirement, '→', req);
 
     // Match agents based on capabilities and use cases
     for (const [agentId, spec] of Object.entries(allAgents)) {
       const matches =
         spec.capabilities.some(cap => {
           const normalizedCap = cap.toLowerCase().replace(/_/g, ' ');
-          return req.includes(normalizedCap) || normalizedCap.includes(req);
+          const match = req.includes(normalizedCap) || normalizedCap.includes(req);
+          if (match) {
+            console.error('[DEBUG] MATCH! Agent:', agentId, 'Capability:', cap, '→', normalizedCap);
+          }
+          return match;
         }) ||
         spec.typical_use_cases.some(useCase => {
           const normalizedUseCase = useCase.toLowerCase().replace(/_/g, ' ');
-          return req.includes(normalizedUseCase) || normalizedUseCase.includes(req);
+          const match = req.includes(normalizedUseCase) || normalizedUseCase.includes(req);
+          if (match) {
+            console.error('[DEBUG] MATCH! Agent:', agentId, 'Use case:', useCase, '→', normalizedUseCase);
+          }
+          return match;
         }) ||
         req.includes(spec.specialization.toLowerCase().replace(/_/g, ' '));
 
@@ -66,6 +79,8 @@ export async function selectAgentsFromRegistry(requirements: string[]): Promise<
       }
     }
   }
+
+  console.error('[DEBUG] Selected agents:', Array.from(selected));
 
   // Always include loveless for implementation tasks
   if (selected.has('hollowed_eyes')) {
