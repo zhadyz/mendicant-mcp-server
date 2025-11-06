@@ -1,497 +1,884 @@
-# mendicant MCP Server - Usage Guide
+# Mendicant MCP Server - Usage Guide
 
-## Start Here: MVP Path (Recommended)
+## Introduction
 
-**Week 1:** Use only `mendicant_plan` with 2 patterns
+This guide provides comprehensive usage patterns for the Mendicant MCP Server. The server implements the mendicant_bias orchestration pattern through a collection of tools that enable strategic planning, adaptive learning, and multi-agent coordination.
 
-```javascript
-// Your workflow:
-1. User: "scaffold authentication system"
-2. Call: mendicant_plan("scaffold authentication system")
-3. Get: Plan with [the_architect, hollowed_eyes, loveless]
-4. You: Spawn agents sequentially using Task tool
-5. You: Synthesize results naturally in your response
-```
+**Target Audience:** Claude Code instances orchestrating specialized agents
+**Prerequisites:** Understanding of Claude Code's Task tool and agent system
 
-**Why MVP first?**
-- Validates core hypothesis: Does planning intelligence improve orchestration?
-- Keeps complexity low while learning usage patterns
-- You (Claude) already excel at synthesis - don't outsource it yet
+## Quick Start
 
----
+### Minimal Workflow
 
-## Tool-by-Tool Usage Guide
+```typescript
+// 1. Plan the objective
+const plan = await mendicant_plan("implement user authentication");
 
-### 1. `mendicant_plan` - USE THIS FIRST ✅
-
-**What it does well:**
-- Selects appropriate agents based on objective
-- Orders agents correctly (architect before implementation, verification after)
-- Matches objectives to proven patterns (SCAFFOLD, FIX_TESTS, etc.)
-- Provides execution strategy (sequential vs parallel vs phased)
-
-**What it doesn't do:**
-- Understand your specific codebase context (you add that when spawning)
-- Generate deeply customized prompts (uses templates)
-- Know about your current project state (git status, test failures, etc.)
-
-**When to use:**
-- Every multi-agent workflow
-- When you're unsure which agents to spawn
-- When you need execution strategy guidance
-
-**Example:**
-```javascript
-// Scenario: User asks to "fix failing tests"
-const plan = await mendicant_plan("fix failing tests");
-
-// Returns:
-{
-  agents: [
-    { agent_id: "loveless", task: "Identify test failures", priority: "critical" },
-    { agent_id: "hollowed_eyes", task: "Implement fixes", dependencies: ["loveless"] },
-    { agent_id: "loveless", task: "Verify fixes", dependencies: ["hollowed_eyes"] }
-  ],
-  execution_strategy: "sequential",
-  success_criteria: "All tests passing"
+// 2. Execute agents sequentially or in parallel
+for (const agent of plan.agents) {
+  await Task(agent.agent_id, agent.prompt);
 }
 
-// You then:
-Task(loveless, prompt="Investigate test failures in the test suite...")
-// Wait for results
-Task(hollowed_eyes, prompt="Fix the following test failures: [loveless results]...")
-// Wait for results
-Task(loveless, prompt="Re-run tests to verify fixes...")
+// 3. Record feedback for learning
+await mendicant_record_feedback({
+  agent_id: "hollowed_eyes",
+  success: true,
+  tokens_used: 45000
+});
 ```
 
-**Limitations:**
-- Prompts are generic templates - you enhance them with project context
-- Doesn't know about past executions initially (bootstrap problem)
-- Pattern matching is keyword-based, not semantic
+### Progressive Adoption Path
+
+**Week 1:** Use `mendicant_plan` for all multi-agent workflows
+**Week 2:** Add `mendicant_analyze` for autonomous mode
+**Week 3:** Integrate `mendicant_record_feedback` for learning
+**Week 4:** Leverage `mendicant_predict_agents` for optimization
 
 ---
 
-### 2. `mendicant_analyze` - ADD WHEN USEFUL ⚠️
+## Tool Categories
 
-**What it does well:**
-- Quick health score (0-100) based on structured data
-- Flags critical issues from test results, build status
-- Recommends agents to fix specific issues
-- Lightweight and fast
+### Core Planning Tools
 
-**What it doesn't do:**
-- Understand semantic issues ("code is messy but works")
-- Read your actual codebase (needs you to provide context)
-- Detect subtle problems (security vulns, performance issues)
+Tools for strategic planning and execution strategy.
+
+#### `mendicant_plan`
+
+**Purpose:** Generate strategic orchestration plan from objective
 
 **When to use:**
-- Autonomous mode (scan project, prioritize fixes)
-- Before planning (get context about current state)
-- After major changes (verify project health)
+- Multi-agent workflows (3+ agents)
+- Unfamiliar problem domains
+- Need execution strategy guidance (sequential vs parallel)
+- Want to leverage pattern library
 
 **When NOT to use:**
-- You're already looking at test results
-- You need deep code analysis (use the_didact instead)
-- You want actual fixes (this just recommends)
+- Single-agent tasks (just spawn the agent directly)
+- Already know exact agent sequence
+- Simple, well-understood operations
+
+**Capabilities:**
+- Pattern matching against objective keywords
+- Agent selection based on capabilities
+- Dependency ordering
+- Token estimation
+- Execution strategy (sequential/parallel/phased)
+
+**Limitations:**
+- Prompts are templates requiring context enrichment
+- Pattern matching is keyword-based, not semantic
+- Cannot understand codebase specifics
+- No awareness of prior conversation context
 
 **Example:**
-```javascript
-// Autonomous mode workflow:
-const analysis = await mendicant_analyze({
-  test_results: { passed: 45, failed: 3, errors: ["auth.test.js", "db.test.js"] },
-  build_status: "passing",
-  git_status: { uncommitted_changes: 12, untracked_files: 2 }
+
+```typescript
+// Input
+const plan = await mendicant_plan("scaffold authentication system", {
+  context: {
+    project_type: "nextjs",
+    has_tests: false
+  },
+  constraints: {
+    max_agents: 5,
+    prefer_parallel: false
+  }
 });
 
-// Returns:
+// Output
 {
-  health_score: 75,
-  critical_issues: [
-    { type: "test_failure", file: "auth.test.js", severity: "high" },
-    { type: "test_failure", file: "db.test.js", severity: "high" }
+  agents: [
+    {
+      agent_id: "the_architect",
+      task_description: "Design authentication architecture",
+      prompt: "Design a secure authentication architecture for a Next.js application...",
+      dependencies: [],
+      priority: "high"
+    },
+    {
+      agent_id: "hollowed_eyes",
+      task_description: "Implement authentication",
+      prompt: "Implement the authentication system based on the architecture...",
+      dependencies: ["the_architect"],
+      priority: "critical"
+    },
+    {
+      agent_id: "loveless",
+      task_description: "Verify implementation",
+      prompt: "Test and verify the authentication implementation...",
+      dependencies: ["hollowed_eyes"],
+      priority: "critical"
+    }
   ],
-  recommendations: [
-    { action: "fix_tests", agent: "loveless", priority: "critical" }
-  ],
-  suggested_agents: ["loveless", "hollowed_eyes"]
+  execution_strategy: "sequential",
+  success_criteria: "Authentication implemented and verified",
+  estimated_tokens: 120000,
+  pattern_matched: "SCAFFOLD"
 }
 
-// Then:
-const plan = await mendicant_plan("fix failing tests in auth.test.js and db.test.js");
-// Execute plan...
+// Usage
+for (const agent of plan.agents) {
+  // Enrich prompt with project-specific context
+  const enriched_prompt = `${agent.prompt}\n\nProject context: ${project_details}`;
+  await Task(agent.agent_id, enriched_prompt);
+}
 ```
 
-**Limitations:**
-- Only analyzes structured data you provide (can't read files itself)
-- Health score is heuristic-based, not intelligent
-- Recommendations are rule-based, not context-aware
+#### `mendicant_coordinate`
 
----
-
-### 3. `mendicant_coordinate` - DEFER UNTIL PROVEN NECESSARY ⚠️⚠️
-
-**What it does well:**
-- Structures multi-agent results for easier processing
-- Detects obvious conflicts (keyword matching)
-- Identifies missing agents (gap detection)
-- Provides metadata about results
-
-**What it CANNOT do:**
-- Semantic conflict detection (can't understand "architect said Redux, hollowed_eyes used Zustand")
-- True synthesis (that requires LLM intelligence - which is YOU)
-- Resolve conflicts (only flags them)
-- Deep content analysis
+**Purpose:** Structured synthesis of multi-agent results
 
 **When to use:**
-- You're running 5+ agents and need structure
-- You want automated gap detection
-- You're building a UI that needs result metadata
+- 5+ agents with complex interdependencies
+- Need automated gap detection
+- Building tooling that requires structured output
+- Want basic conflict flagging
 
 **When NOT to use:**
-- 1-3 agents (you synthesize naturally)
-- You need actual understanding (you're better at this)
-- Results are simple and clear
+- 1-3 agents (natural synthesis is better)
+- Need semantic conflict detection (you're better at this)
+- Simple, clear results
+
+**Capabilities:**
+- Structured result aggregation
+- Keyword-based conflict detection
+- Gap identification (missing agents)
+- Metadata extraction
+
+**Limitations:**
+- **Cannot perform semantic synthesis** (requires LLM intelligence)
+- Conflict detection is keyword-based only
+- Cannot resolve conflicts, only flag them
+- Does not add intelligence, only structure
 
 **Example:**
-```javascript
-// After running multiple agents:
-const results = [
-  { agent_id: "the_architect", output: "Use Redux for state...", success: true },
-  { agent_id: "hollowed_eyes", output: "Implemented with Zustand...", success: true },
-  { agent_id: "loveless", output: "Tests passing", success: true }
-];
 
-const coordination = await mendicant_coordinate("implement state management", results);
+```typescript
+// Input
+const coordination = await mendicant_coordinate("implement state management", [
+  {
+    agent_id: "the_architect",
+    output: "Recommended Redux for global state management...",
+    success: true,
+    duration_ms: 25000,
+    tokens_used: 30000
+  },
+  {
+    agent_id: "hollowed_eyes",
+    output: "Implemented using Zustand for state management...",
+    success: true,
+    duration_ms: 40000,
+    tokens_used: 45000
+  },
+  {
+    agent_id: "loveless",
+    output: "Tests passing with current implementation",
+    success: true,
+    duration_ms: 20000,
+    tokens_used: 25000
+  }
+]);
 
-// Returns:
+// Output
 {
-  synthesis: "Multiple agents completed state management tasks",
+  synthesis: "Three agents completed state management implementation",
   conflicts: [
     {
       agents: ["the_architect", "hollowed_eyes"],
-      issue: "Different state management solutions mentioned",
-      severity: "high"
+      issue: "Different state management libraries mentioned (Redux vs Zustand)",
+      severity: "high",
+      requires_resolution: true
     }
   ],
   gaps: [],
-  recommendations: ["Verify state management consistency"],
+  recommendations: [
+    "Verify state management library consistency",
+    "Ensure all components use the chosen solution"
+  ],
   verification_needed: true
 }
 
-// But you (Claude) would naturally notice this conflict when reading the results anyway!
-// This tool just structures it - it doesn't add intelligence
+// Note: You would naturally detect this conflict anyway when reading the results
+// This tool provides structure but not intelligence
 ```
+
+#### `mendicant_analyze`
+
+**Purpose:** Project health assessment and recommendations
+
+**When to use:**
+- Autonomous mode (proactive scanning)
+- Before planning (understand current state)
+- After major changes (verify health)
+- Continuous monitoring scenarios
+
+**When NOT to use:**
+- You're already examining test results manually
+- Need deep semantic analysis
+- Want actual fixes (this only recommends)
+
+**Capabilities:**
+- Health score calculation (0-100)
+- Critical issue flagging
+- Agent recommendations
+- Prioritization guidance
 
 **Limitations:**
-- **This tool is over-engineered for MVP**
-- Conflict detection is keyword-based, not semantic
-- Cannot resolve conflicts, only flag them
-- **You (Claude) are better at synthesis than this tool**
+- Operates only on provided structured data
+- Health score is heuristic-based
+- Cannot read files or codebase
+- Recommendations are rule-based
 
-**Recommendation:** Skip this tool entirely until you find yourself repeatedly doing the same synthesis pattern. Then add it as a time-saver, not an intelligence augmentation.
+**Example:**
 
----
+```typescript
+// Input
+const analysis = await mendicant_analyze({
+  context: {
+    git_status: "modified: 15 files, untracked: 3 files",
+    test_results: {
+      passed: 142,
+      failed: 8,
+      total: 150,
+      coverage: 78.5
+    },
+    build_status: "success with warnings",
+    recent_errors: [
+      "TypeError in auth.service.ts",
+      "Import resolution failure in test file"
+    ]
+  }
+});
 
-## Recommended Progression
+// Output
+{
+  health_score: 72,
+  critical_issues: [
+    {
+      type: "test_failures",
+      severity: "high",
+      description: "8 tests failing (5.3% failure rate)",
+      affected_files: ["auth.service.test.ts", "user.controller.test.ts"],
+      suggested_fix: "Run loveless for investigation, then hollowed_eyes for fixes"
+    },
+    {
+      type: "build_warnings",
+      severity: "medium",
+      description: "Build completed with warnings",
+      suggested_fix: "Review build output and address warnings"
+    }
+  ],
+  recommendations: [
+    {
+      action: "fix_failing_tests",
+      priority: "critical",
+      agents: ["loveless", "hollowed_eyes"]
+    },
+    {
+      action: "reduce_uncommitted_changes",
+      priority: "medium",
+      agents: ["the_curator"]
+    }
+  ],
+  suggested_agents: ["loveless", "hollowed_eyes", "the_curator"]
+}
 
-### Stage 1: MVP (This Weekend)
-
-```javascript
-// ONLY use mendicant_plan
-// Patterns: SCAFFOLD, FIX_TESTS
-
-// Example workflow:
-User: "scaffold authentication for EDPT project"
-  ↓
-You: mendicant_plan("scaffold authentication system", { project_type: "web app" })
-  ↓
-MCP: Returns plan with [the_architect, hollowed_eyes, the_scribe, loveless]
-  ↓
-You: Task(the_architect, "Design authentication architecture...")
-      Wait for result
-      Task(hollowed_eyes, "Implement [architecture]...")
-      Wait for result
-      Task(the_scribe, "Document authentication system...")
-      Wait for result
-      Task(loveless, "Verify implementation and docs...")
-  ↓
-You: Synthesize all results naturally in your response
-```
-
-**Validate:**
-- Did planning improve agent selection?
-- Were execution strategies helpful?
-- Did prompts need heavy customization?
-
-### Stage 2: Add Analysis (Next Week)
-
-```javascript
-// Add mendicant_analyze for autonomous mode
-
-// Example: Autonomous scan workflow
-You: mendicant_analyze({ test_results, build_status, git_status })
-  ↓
-MCP: Returns health score + critical issues + recommendations
-  ↓
-You: mendicant_plan("fix critical issues: [issues from analysis]")
-  ↓
-You: Execute plan with agents
-```
-
-**Validate:**
-- Does analysis save you time in autonomous mode?
-- Are recommendations accurate?
-- Is health score useful?
-
-### Stage 3: Add Learning (Later)
-
-```javascript
-// Store executions in mnemosyne
-// Query past successful executions in planning
-
-// This requires:
-1. Execution tracking (store plans + results)
-2. mnemosyne integration working
-3. Pattern library stabilized
-```
-
-### Stage 4: Consider Coordination (Only if Needed)
-
-```javascript
-// ONLY add if you find yourself:
-- Repeatedly synthesizing 5+ agent results
-- Manually checking for conflicts every time
-- Building a UI that needs structured results
-
-// Otherwise, skip this tool permanently
+// Usage
+const plan = await mendicant_plan(
+  `Fix critical issues: ${analysis.critical_issues.map(i => i.description).join(', ')}`
+);
 ```
 
 ---
 
-## Pattern Library Usage
+### Adaptive Learning Tools (Mahoraga System)
 
-### Available Patterns
+Tools for continuous learning and optimization through execution history.
 
-1. **SCAFFOLD** - New project setup
-   - Agents: the_architect → the_scribe → hollowed_eyes → loveless
-   - Use when: Starting new feature, new service, new module
+#### `mendicant_record_feedback`
 
-2. **FIX_TESTS** - Test failure resolution
-   - Agents: loveless → hollowed_eyes → loveless
-   - Use when: Tests failing, need debugging
+**Purpose:** Record agent execution outcomes for passive learning
 
-3. **SECURITY_FIX** - Security vulnerability remediation
-   - Agents: loveless → hollowed_eyes → loveless → the_scribe
-   - Use when: Security scan found issues, CVE needs fixing
+**When to use:**
+- After every agent execution
+- Building execution history
+- Want performance tracking
+- Enable adaptive improvements
 
-4. **DEPLOYMENT** - Deployment configuration
-   - Agents: the_sentinel → zhadyz → loveless
-   - Use when: Setting up CI/CD, deployment pipelines
+**Usage Pattern:**
 
-5. **FEATURE_IMPLEMENTATION** - New feature development
-   - Agents: the_didact → the_architect → hollowed_eyes → loveless → the_scribe
-   - Use when: Implementing complex new functionality
+```typescript
+// After agent execution
+const result = await Task("hollowed_eyes", "implement feature X");
 
-6. **BUG_FIX** - Bug investigation and repair
-   - Agents: the_didact → hollowed_eyes → loveless
-   - Use when: Bug reported, needs investigation
+await mendicant_record_feedback({
+  agent_id: "hollowed_eyes",
+  success: result.success,
+  tokens_used: result.tokens,
+  duration_ms: result.duration,
+  error: result.error || undefined
+});
+```
 
-### Pattern Matching Logic
+**Impact:** Builds statistical model for `mendicant_predict_agents` and `mendicant_analyze_failure`
 
-Patterns match on keywords in the objective:
+#### `mendicant_discover_agents`
 
-```javascript
-// Examples that trigger patterns:
-"scaffold a new authentication system"    → SCAFFOLD
-"fix the failing unit tests"              → FIX_TESTS
-"security vulnerability in dependencies"  → SECURITY_FIX
-"set up deployment pipeline"              → DEPLOYMENT
-"implement user profile feature"          → FEATURE_IMPLEMENTATION
-"bug in payment processing"               → BUG_FIX
+**Purpose:** Register custom agents at runtime
 
-// If no pattern matches:
-// Custom plan generated based on agent capabilities
+**When to use:**
+- Created new specialized agents
+- Integrating third-party agents
+- Dynamic agent systems
+
+**Example:**
+
+```typescript
+await mendicant_discover_agents({
+  agent_ids: ["custom_ml_agent", "custom_security_agent"]
+});
+```
+
+#### `mendicant_list_learned_agents`
+
+**Purpose:** Query agent performance statistics
+
+**Example:**
+
+```typescript
+// Get all agents
+const all_agents = await mendicant_list_learned_agents({ ranked: false });
+
+// Get agents ranked by success rate
+const ranked = await mendicant_list_learned_agents({ ranked: true });
+
+// Output
+{
+  "hollowed_eyes": {
+    total_executions: 156,
+    success_rate: 0.92,
+    avg_tokens: 42000,
+    avg_duration_ms: 35000,
+    last_used: "2025-01-15T10:30:00Z"
+  },
+  "loveless": {
+    total_executions: 203,
+    success_rate: 0.95,
+    avg_tokens: 28000,
+    avg_duration_ms: 22000,
+    last_used: "2025-01-15T11:15:00Z"
+  }
+}
+```
+
+#### `mendicant_predict_agents`
+
+**Purpose:** Predict agent success rates before execution
+
+**When to use:**
+- Choosing between multiple agent candidates
+- Resource optimization decisions
+- Risk assessment before expensive operations
+
+**Capabilities:**
+- Statistical prediction based on history
+- Confidence scoring
+- Context-aware predictions
+
+**Example:**
+
+```typescript
+const predictions = await mendicant_predict_agents({
+  agent_ids: ["hollowed_eyes", "the_architect", "loveless"],
+  objective: "implement authentication feature",
+  context: { project_type: "nextjs" }
+});
+
+// Output
+{
+  predictions: [
+    {
+      agent_id: "hollowed_eyes",
+      predicted_success_rate: 0.89,
+      confidence: 0.85,
+      similar_executions: 23,
+      reasoning: "High success rate on similar implementation tasks in Next.js projects"
+    },
+    {
+      agent_id: "the_architect",
+      predicted_success_rate: 0.92,
+      confidence: 0.78,
+      similar_executions: 15,
+      reasoning: "Consistently successful on architecture design tasks"
+    },
+    {
+      agent_id: "loveless",
+      predicted_success_rate: 0.94,
+      confidence: 0.90,
+      similar_executions: 31,
+      reasoning: "Very high success rate on verification and testing tasks"
+    }
+  ]
+}
+
+// Usage: Prioritize agents with high predicted success rates
+const best_agent = predictions.predictions.sort(
+  (a, b) => b.predicted_success_rate - a.predicted_success_rate
+)[0];
+```
+
+#### `mendicant_analyze_failure`
+
+**Purpose:** Root cause analysis for agent failures
+
+**When to use:**
+- Agent execution failed
+- Need to understand failure patterns
+- Want alternative approaches
+- Debugging orchestration issues
+
+**Capabilities:**
+- Pattern matching against historical failures
+- Root cause hypothesis generation
+- Alternative agent suggestions
+- Avoidance rule generation
+
+**Example:**
+
+```typescript
+// Agent failed during execution
+const analysis = await mendicant_analyze_failure({
+  objective: "implement database migrations",
+  failed_agent_id: "hollowed_eyes",
+  error: "ModuleNotFoundError: No module named 'alembic'",
+  preceding_agents: ["the_architect"],
+  context: { project_type: "python" }
+});
+
+// Output
+{
+  failure_patterns: [
+    {
+      pattern: "Missing dependency in implementation phase",
+      frequency: 12,
+      common_context: "python projects",
+      typical_solution: "Install dependencies before implementation"
+    }
+  ],
+  root_cause_hypothesis: "Dependencies were not installed before implementation agent execution",
+  avoidance_rules: [
+    "Always verify dependencies before spawning implementation agents",
+    "Consider spawning the_sentinel first for dependency management"
+  ],
+  suggested_fixes: [
+    "Install alembic package",
+    "Update requirements.txt or pyproject.toml",
+    "Re-run hollowed_eyes after dependency installation"
+  ],
+  alternative_agents: [
+    {
+      agent_id: "the_sentinel",
+      reason: "Specialized in dependency and environment management",
+      confidence: 0.88
+    }
+  ],
+  confidence: 0.82
+}
+```
+
+#### `mendicant_refine_plan`
+
+**Purpose:** Improve failed plan using learned patterns
+
+**When to use:**
+- Plan execution failed
+- Want systematic improvement
+- Leverage historical successes
+
+**Example:**
+
+```typescript
+// Original plan failed
+const original_plan = { /* ... failed plan ... */ };
+const failure_context = await mendicant_analyze_failure(/* ... */);
+
+const refinement = await mendicant_refine_plan({
+  original_plan,
+  failure_context,
+  objective: "implement database migrations",
+  project_context: { project_type: "python" }
+});
+
+// Output
+{
+  refined_plan: {
+    agents: [
+      {
+        agent_id: "the_sentinel",
+        task_description: "Setup dependencies and environment",
+        prompt: "Install and configure alembic and database dependencies...",
+        dependencies: [],
+        priority: "critical"
+      },
+      {
+        agent_id: "hollowed_eyes",
+        task_description: "Implement migrations",
+        prompt: "Create database migration scripts...",
+        dependencies: ["the_sentinel"],
+        priority: "high"
+      },
+      {
+        agent_id: "loveless",
+        task_description: "Verify migrations",
+        prompt: "Test migration up/down sequences...",
+        dependencies: ["hollowed_eyes"],
+        priority: "medium"
+      }
+    ],
+    execution_strategy: "sequential"
+  },
+  changes_made: [
+    {
+      type: "agent_addition",
+      agent_id: "the_sentinel",
+      position: 0,
+      reason: "Missing dependency management step"
+    }
+  ],
+  reasoning: "Added the_sentinel at start to handle dependency installation before implementation",
+  confidence: 0.85
+}
+```
+
+#### `mendicant_find_patterns`
+
+**Purpose:** Discover similar successful executions
+
+**When to use:**
+- Exploring new problem domains
+- Want proven approaches
+- Learning from history
+
+**Example:**
+
+```typescript
+const patterns = await mendicant_find_patterns({
+  objective: "implement real-time notifications",
+  context: { project_type: "nextjs" },
+  limit: 5
+});
+
+// Output
+{
+  patterns: [
+    {
+      objective: "implement real-time chat",
+      agents_used: ["the_architect", "the_didact", "hollowed_eyes", "loveless"],
+      similarity_score: 0.87,
+      success_rate: 0.93,
+      execution_count: 4,
+      avg_tokens: 125000,
+      context: { project_type: "nextjs" }
+    },
+    {
+      objective: "add websocket support",
+      agents_used: ["hollowed_eyes", "loveless"],
+      similarity_score: 0.76,
+      success_rate: 0.89,
+      execution_count: 7,
+      avg_tokens: 85000,
+      context: { project_type: "nextjs" }
+    }
+  ]
+}
+
+// Usage: Leverage proven agent sequences for similar objectives
 ```
 
 ---
 
-## Anti-Patterns (Don't Do This)
+## Workflow Patterns
 
-### ❌ Calling MCP for Single-Agent Tasks
+### Pattern: Basic Multi-Agent Task
 
-```javascript
-// BAD:
-mendicant_plan("run the tests")
-// Returns: [loveless]
-Task(loveless, "run tests")
+```typescript
+// 1. Plan
+const plan = await mendicant_plan("implement user authentication");
 
-// GOOD:
-// Just spawn loveless directly - you don't need planning for single agents
-Task(loveless, "run the full test suite and report failures")
+// 2. Execute
+for (const agent of plan.agents) {
+  const result = await Task(agent.agent_id, agent.prompt);
+
+  // 3. Record feedback
+  await mendicant_record_feedback({
+    agent_id: agent.agent_id,
+    success: result.success,
+    tokens_used: result.tokens,
+    duration_ms: result.duration
+  });
+}
 ```
 
-### ❌ Using mendicant_coordinate for Simple Results
+### Pattern: Adaptive Execution with Prediction
 
-```javascript
-// BAD:
-Task(hollowed_eyes, "implement login form")
-const result = await hollowed_eyes.result;
-mendicant_coordinate("implement login form", [result])
+```typescript
+// 1. Get predictions
+const predictions = await mendicant_predict_agents({
+  agent_ids: ["hollowed_eyes", "the_architect"],
+  objective: "refactor legacy code",
+  context: { project_type: "python" }
+});
 
-// GOOD:
-Task(hollowed_eyes, "implement login form")
-// Just read the result and respond naturally
+// 2. Choose best agent
+const best = predictions.predictions[0];
+
+// 3. Execute
+const result = await Task(best.agent_id, prompt);
+
+// 4. Record
+await mendicant_record_feedback({
+  agent_id: best.agent_id,
+  success: result.success
+});
 ```
 
-### ❌ Calling mendicant_analyze Without Context
+### Pattern: Failure Recovery
 
-```javascript
-// BAD:
-mendicant_analyze({}) // Empty context - returns nothing useful
+```typescript
+try {
+  // 1. Execute agent
+  const result = await Task("hollowed_eyes", "implement feature");
 
-// GOOD:
-// Gather context first
-const testResults = parseTestOutput(await bash("npm test"));
-const gitStatus = parseGitStatus(await bash("git status"));
-mendicant_analyze({ test_results: testResults, git_status: gitStatus })
+  if (!result.success) {
+    // 2. Analyze failure
+    const analysis = await mendicant_analyze_failure({
+      objective: "implement feature",
+      failed_agent_id: "hollowed_eyes",
+      error: result.error,
+      preceding_agents: []
+    });
+
+    // 3. Try alternative
+    const alternative = analysis.alternative_agents[0];
+    await Task(alternative.agent_id, prompt);
+  }
+} catch (error) {
+  // Handle error
+}
 ```
 
-### ❌ Over-relying on Pattern Matching
+### Pattern: Autonomous Health Monitoring
 
-```javascript
-// BAD:
-// Blindly using pattern without understanding objective
-const plan = await mendicant_plan("do something with auth");
-// Might match wrong pattern
+```typescript
+// 1. Analyze project
+const analysis = await mendicant_analyze({
+  context: {
+    git_status: await bash("git status"),
+    test_results: await parseTestOutput(),
+    build_status: await parseBuildOutput()
+  }
+});
 
-// GOOD:
-// Be specific in objective
-const plan = await mendicant_plan("scaffold a new authentication system with JWT tokens");
-// Clear objective → correct pattern
+// 2. Plan intervention if needed
+if (analysis.health_score < 80) {
+  const plan = await mendicant_plan(
+    `Address critical issues: ${analysis.critical_issues.map(i => i.description).join(', ')}`
+  );
+
+  // 3. Execute plan
+  for (const agent of plan.agents) {
+    await Task(agent.agent_id, agent.prompt);
+  }
+}
 ```
 
 ---
 
 ## Integration with Commands
 
-### Updated Command Structure
+### Autonomous Mode Command
 
 ```markdown
-## OLD (.claude/commands/autonomous.md)
-Spawn mendicant_bias in autonomous mode.
-Use Task tool with subagent_type="mendicant_bias".
-❌ Broken: mendicant_bias can't spawn agents
+# .claude/commands/autonomous.md
 
-## NEW (.claude/commands/autonomous.md)
-You are Claude Code embodying **mendicant_bias orchestration patterns**.
+You are embodying the **mendicant_bias orchestration pattern**.
 
-1. Call: mendicant_analyze() to assess project health
-2. Call: mendicant_plan(objective) to get strategy
-3. Spawn agents: Task(hollowed_eyes), Task(loveless)
-4. Synthesize results naturally (no coordination tool needed)
-5. Present unified output
+**Workflow:**
 
-✅ Works: You embody mendicant_bias, MCP provides intelligence
+1. **Assess:** `mendicant_analyze()` to evaluate project health
+2. **Plan:** `mendicant_plan()` based on critical issues
+3. **Execute:** Spawn agents using Task tool
+4. **Learn:** `mendicant_record_feedback()` after each agent
+5. **Synthesize:** Present unified results to user
+```
+
+### Fix Command
+
+```markdown
+# .claude/commands/fix.md
+
+You are using mendicant intelligence for systematic issue resolution.
+
+**Workflow:**
+
+1. **Understand:** Gather context about the issue
+2. **Predict:** `mendicant_predict_agents()` to choose best approach
+3. **Plan:** `mendicant_plan()` for the fix
+4. **Execute:** Run agents sequentially
+5. **Recover:** If failure, use `mendicant_analyze_failure()` + `mendicant_refine_plan()`
+6. **Learn:** Record all feedback
 ```
 
 ---
 
-## Success Metrics
+## Best Practices
 
-**How to know if this is working:**
+### DO
 
-✅ **Week 1 Success:**
-- `mendicant_plan` correctly identifies agents needed
-- Execution strategies (sequential/parallel/phased) are helpful
-- You spawn fewer wrong agents
-- Multi-agent workflows feel more structured
+✅ **Enrich prompts with context:** Plan prompts are templates - add project specifics
+✅ **Record all executions:** Enable learning through consistent feedback
+✅ **Use predictions strategically:** Let data guide agent selection
+✅ **Leverage patterns:** Check `mendicant_find_patterns` for proven approaches
+✅ **Handle failures systematically:** Use analyze_failure → refine_plan workflow
 
-⚠️ **Week 1 Concerns:**
-- Prompts too generic (need heavy customization)
-- Pattern matching misses objectives
-- Planning adds overhead without value
+### DON'T
 
-✅ **Week 2 Success:**
-- `mendicant_analyze` saves time in autonomous mode
-- Health scores align with your assessment
-- Recommendations are actionable
-
-⚠️ **Week 2 Concerns:**
-- Analysis misses critical issues
-- Health scores don't reflect reality
-- You ignore recommendations
+❌ **Don't call mendicant_plan for single agents:** Just spawn the agent directly
+❌ **Don't expect semantic understanding:** Server provides structure, not intelligence
+❌ **Don't over-rely on coordination:** You're better at synthesis than keyword matching
+❌ **Don't skip feedback recording:** Learning requires consistent data
+❌ **Don't treat predictions as guarantees:** They're statistical estimates
 
 ---
 
-## When to Simplify
+## Performance Optimization
 
-**Consider removing features if:**
+### Token Efficiency
 
-- `mendicant_coordinate`: You never use it after 2 weeks
-- `mendicant_analyze`: Health scores are consistently wrong
-- Pattern library: Patterns never match your actual workflows
-- mnemosyne integration: Learning doesn't improve planning
+```typescript
+// Inefficient: Over-planning
+await mendicant_plan("run tests");  // Just spawn loveless directly
 
-**Simplification options:**
-1. Remove unused tools from MCP server
-2. Simplify pattern library (fewer patterns)
-3. Make prompts more generic (less template complexity)
-4. Remove mnemosyne integration if learning doesn't help
-
----
-
-## Debugging Guide
-
-### Plan Doesn't Match Objective
-
-```javascript
-// Symptom: mendicant_plan returns wrong agents
-mendicant_plan("fix the login bug")
-// Returns: [the_scribe] ??? Should be [hollowed_eyes, loveless]
-
-// Debug:
-1. Check pattern matching in patterns.ts
-2. Verify agent_specs.ts has correct capabilities
-3. Add logging to see which pattern matched
-4. Make objective more specific: "debug and fix login authentication bug"
+// Efficient: Plan complex workflows
+await mendicant_plan("scaffold microservice with CI/CD");
 ```
 
-### Agents Spawned in Wrong Order
+### Execution Strategy
 
-```javascript
-// Symptom: Dependencies not respected
-// Plan says: the_architect → hollowed_eyes
-// But you spawned: hollowed_eyes → the_architect
+```typescript
+// Use parallel execution for independent tasks
+const plan = await mendicant_plan(objective, {
+  constraints: { prefer_parallel: true }
+});
 
-// Fix:
-1. Check plan.execution_strategy (sequential vs parallel)
-2. If "sequential", spawn one at a time and wait
-3. If "phased", respect phase order
-4. Check dependencies array in AgentSpec
-```
-
-### Coordination Returns Empty Conflicts
-
-```javascript
-// Symptom: Obvious conflict but mendicant_coordinate returns []
-
-// Explanation:
-// Conflict detection is keyword-based, not semantic
-// It can't understand "architect said Redux, hollowed_eyes used Zustand"
-
-// Solution:
-// Do synthesis yourself - you're better at it
-// Only use coordination for structural metadata, not intelligence
+// Respect dependencies for sequential tasks
+if (plan.execution_strategy === "sequential") {
+  for (const agent of plan.agents) {
+    await Task(agent.agent_id, agent.prompt);
+  }
+}
 ```
 
 ---
 
-## Next Steps
+## Troubleshooting
 
-1. **Test MVP:** Run `mendicant_plan` with SCAFFOLD pattern on EDPT project
-2. **Iterate:** Fix pattern matching issues as they arise
-3. **Add analysis:** Once planning works, add `mendicant_analyze` for autonomous mode
-4. **Defer coordination:** Don't use `mendicant_coordinate` until proven necessary
-5. **Add learning:** Once patterns stabilize, integrate with mnemosyne
+### Pattern Mismatch
 
-**Remember:** The MCP provides structure and pattern matching. You (Claude) provide intelligence and synthesis. Don't outsource your strengths.
+**Problem:** Plan doesn't match objective
+
+**Solutions:**
+1. Make objective more specific: "debug login bug" → "investigate and fix OAuth login authentication failure"
+2. Provide context: `{ project_type: "nextjs", has_tests: true }`
+3. Check pattern library keywords in src/knowledge/patterns.ts
+
+### Low Prediction Confidence
+
+**Problem:** Predictions have low confidence scores
+
+**Solutions:**
+1. Record more execution feedback (bootstrap problem)
+2. Provide richer context
+3. Use `mendicant_find_patterns` to discover similar successful cases
+
+### Coordination Misses Conflicts
+
+**Problem:** Obvious conflicts not detected
+
+**Explanation:** Coordination uses keyword matching, not semantic understanding
+
+**Solution:** Do synthesis yourself - you're better at detecting semantic conflicts
+
+---
+
+## Advanced Usage
+
+### Mnemosyne Integration
+
+```typescript
+// Store execution in mnemosyne
+await mnemosyne.createEntities([{
+  name: `Execution: ${objective}`,
+  entityType: "execution_history",
+  observations: [
+    `Objective: ${objective}`,
+    `Agents: ${agents.join(', ')}`,
+    `Success: ${success}`,
+    `Tokens: ${total_tokens}`
+  ]
+}]);
+
+// Query history for planning
+const past = await mnemosyne.searchNodes("authentication implementation");
+const plan = await mendicant_plan(objective, {
+  past_executions: past.results
+});
+```
+
+### Custom Pattern Creation
+
+Add patterns to your workflow by modifying agent sequences based on learned successes:
+
+```typescript
+// Discover successful pattern
+const patterns = await mendicant_find_patterns({
+  objective: "implement real-time feature",
+  limit: 1
+});
+
+// Reuse agent sequence
+const proven_sequence = patterns.patterns[0].agents_used;
+for (const agent_id of proven_sequence) {
+  await Task(agent_id, customPrompt);
+}
+```
+
+---
+
+## Metrics and Monitoring
+
+Track orchestration effectiveness:
+
+```typescript
+const agents = await mendicant_list_learned_agents({ ranked: true });
+
+// Monitor:
+// - Success rates by agent
+// - Average token consumption
+// - Execution duration trends
+// - Pattern match accuracy
+```
+
+---
+
+## Conclusion
+
+The Mendicant MCP Server provides structural intelligence for orchestration. Combine it with your semantic understanding for optimal results:
+
+- **Server:** Pattern matching, learning, structure
+- **You:** Context, synthesis, intelligence
+
+Start with `mendicant_plan`, add `mendicant_record_feedback` for learning, and leverage Mahoraga predictions as your execution history grows.
+
+For implementation details, see [README.md](./README.md)
