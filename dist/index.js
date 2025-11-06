@@ -1,10 +1,18 @@
 #!/usr/bin/env node
+// CRITICAL: Write to log file IMMEDIATELY before any imports to catch early failures
+import { writeFileSync, appendFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+const DEBUG_LOG_EARLY = join(tmpdir(), 'mendicant-debug.log');
+try {
+    writeFileSync(DEBUG_LOG_EARLY, `${new Date().toISOString()} [CRITICAL] Module execution started - BEFORE imports\n`, { flag: 'a' });
+}
+catch (e) {
+    // Can't even write to log - this is catastrophic
+}
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { appendFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
 import { createPlan } from './planner.js';
 import { coordinateResults } from './coordinator.js';
 import { analyzeProject } from './analyzer.js';
