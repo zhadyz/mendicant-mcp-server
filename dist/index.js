@@ -6,6 +6,9 @@ import { createPlan } from './planner.js';
 import { coordinateResults } from './coordinator.js';
 import { analyzeProject } from './analyzer.js';
 import { agentRegistry } from './knowledge/agent_registry.js';
+// Debug: Module loading
+console.error('[DEBUG] index.ts module loading - START');
+console.error('[DEBUG] agentRegistry imported:', typeof agentRegistry);
 /**
  * Mendicant MCP Server
  *
@@ -503,10 +506,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
  * Start the server
  */
 async function main() {
+    console.error('[DEBUG] main() function called');
     const transport = new StdioServerTransport();
+    console.error('[DEBUG] StdioServerTransport created');
     await server.connect(transport);
+    console.error('[DEBUG] Server connected to transport');
     // Log to stderr so it doesn't interfere with MCP protocol on stdout
     console.error('Mendicant MCP Server running on stdio');
+    console.error('[DEBUG] Checking agentRegistry getAllAgents at startup...');
+    const agents = await agentRegistry.getAllAgents();
+    console.error('[DEBUG] Agents at startup:', Object.keys(agents).length);
 }
 main().catch((error) => {
     console.error('Fatal error in main():', error);
