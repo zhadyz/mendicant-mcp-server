@@ -19,33 +19,74 @@ import { bayesianEngine } from './bayesian_confidence.js';
 import { temporalEngine } from './temporal_decay.js';
 import { conflictDetector } from './predictive_conflict_detector.js';
 import { paretoOptimizer } from './pareto_optimizer.js';
+import { KDTree, PatternFeatureExtractor } from './kdtree.js';
 /**
  * Mahoraga's memory - stores and retrieves execution patterns
  */
 export class MahoragaMemory {
     patterns = new Map();
     failures = new Map();
+    // ADAPTATION 2: Failure chain tracking
+    failure_chains = new Map();
+    recent_failures = []; // Window: 10 minutes
+    CHAIN_DETECTION_WINDOW_MS = 600000; // 10 minutes
+    // ADAPTATION 6: KD-tree for O(log n) pattern matching
+    kdTree;
+    featureExtractor;
+    // ADAPTATION 7: Rolling window memory with aggregate statistics
+    ROLLING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+    aggregateStats;
+    constructor() {
+        this.kdTree = new KDTree(12); // 12D feature space
+        this.featureExtractor = new PatternFeatureExtractor();
+        // ADAPTATION 7: Initialize rolling window statistics
+        this.aggregateStats = {
+            total_executions: 0,
+            success_rate: 0.0,
+            avg_duration_ms: 0,
+            avg_tokens: 0,
+            most_used_agents: new Map(),
+            error_frequency: new Map(),
+            hourly_success_rate: new Array(24).fill(0)
+        };
+    }
     /**
      * Record a complete execution pattern
      */
     recordPattern(pattern) {
         this.patterns.set(pattern.id, pattern);
+        // ADAPTATION 6: Insert into KD-tree for fast similarity search
+        const features = this.featureExtractor.extractFeatures(pattern);
+        this.kdTree.insert(features, pattern);
+        // ADAPTATION 7: Update aggregate statistics
+        this.updateAggregateStats(pattern);
         // If it failed, extract failure context
         if (!pattern.success) {
             const failure = this.extractFailureContext(pattern);
             if (failure) {
                 this.failures.set(failure.pattern_id, failure);
+                // ADAPTATION 2: Detect and track failure chains
+                this.addFailureWithChainDetection(failure);
             }
         }
     }
     /**
      * Find patterns similar to the given objective
      */
+    /**
+     * Find patterns similar to the given objective
+     * ADAPTATION 6: Uses KD-tree for O(log n) similarity search instead of O(n) linear search
+     */
     findSimilarPatterns(objective, projectContext, limit = 10) {
-        const matches = [];
         const objectiveType = this.extractObjectiveType(objective);
         const objectiveTags = this.extractTags(objective, projectContext);
-        for (const pattern of this.patterns.values()) {
+        // ADAPTATION 6: Use KD-tree k-NN search for O(log n) performance
+        const queryFeatures = this.featureExtractor.extractQueryFeatures(objective, objectiveType, objectiveTags, projectContext?.project_type);
+        // Get more candidates than needed since we'll filter by threshold
+        const candidates = this.kdTree.kNearestNeighbors(queryFeatures, limit * 3);
+        const matches = [];
+        for (const { point, data: pattern } of candidates) {
+            // Calculate actual similarity score
             const similarity = this.calculateSimilarity(objective, objectiveType, objectiveTags, pattern, projectContext);
             if (similarity > 0.3) { // Minimum threshold
                 matches.push({
@@ -95,9 +136,102 @@ export class MahoragaMemory {
             }
         }
     }
+    /**
+     * ADAPTATION 2: Get recent failures within the chain detection window
+     */
+    getRecentFailures(limit) {
+        const filtered = this.recent_failures.slice(0, limit);
+        return filtered;
+    }
+    /**
+     * ADAPTATION 7: Get current aggregate statistics
+     */
+    getAggregateStats() {
+        // Convert Maps to sorted arrays
+        const most_used_agents = Array.from(this.aggregateStats.most_used_agents.entries())
+            .map(([agent, count]) => ({ agent, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10); // Top 10
+        const error_frequency = Array.from(this.aggregateStats.error_frequency.entries())
+            .map(([error_type, count]) => ({ error_type, count }))
+            .sort((a, b) => b.count - a.count);
+        return {
+            ...this.aggregateStats,
+            most_used_agents,
+            error_frequency,
+            window_size_days: this.ROLLING_WINDOW_MS / (24 * 60 * 60 * 1000)
+        };
+    }
+    /**
+     * ADAPTATION 7: Update aggregate statistics incrementally
+     */
+    updateAggregateStats(pattern) {
+        const stats = this.aggregateStats;
+        const n = stats.total_executions;
+        // Increment total executions
+        stats.total_executions = n + 1;
+        // Update running averages using incremental formula: new_avg = old_avg + (new_value - old_avg) / n
+        stats.avg_duration_ms = n === 0
+            ? pattern.total_duration_ms
+            : stats.avg_duration_ms + (pattern.total_duration_ms - stats.avg_duration_ms) / (n + 1);
+        stats.avg_tokens = n === 0
+            ? pattern.total_tokens
+            : stats.avg_tokens + (pattern.total_tokens - stats.avg_tokens) / (n + 1);
+        // Update success rate
+        const successes = n * stats.success_rate + (pattern.success ? 1 : 0);
+        stats.success_rate = successes / (n + 1);
+        // Track agent usage
+        for (const agent of pattern.agents_used) {
+            const currentCount = stats.most_used_agents.get(agent) || 0;
+            stats.most_used_agents.set(agent, currentCount + 1);
+        }
+        // Track error types (if pattern failed)
+        if (!pattern.success && pattern.failure_reason) {
+            const errorType = this.classifyError(pattern.failure_reason);
+            const currentCount = stats.error_frequency.get(errorType) || 0;
+            stats.error_frequency.set(errorType, currentCount + 1);
+        }
+        // Update hourly success rate
+        const hour = new Date(pattern.timestamp).getHours();
+        const hourBucket = stats.hourly_success_rate[hour] || 0;
+        // Simple moving average within each hour bucket
+        stats.hourly_success_rate[hour] = hourBucket === 0
+            ? (pattern.success ? 1 : 0)
+            : (hourBucket + (pattern.success ? 1 : 0)) / 2;
+    }
+    /**
+     * ADAPTATION 7: Get patterns within rolling window
+     */
+    getRollingWindowPatterns() {
+        const windowStart = Date.now() - this.ROLLING_WINDOW_MS;
+        return Array.from(this.patterns.values())
+            .filter(p => p.timestamp >= windowStart)
+            .sort((a, b) => b.timestamp - a.timestamp); // Most recent first
+    }
     // Private helpers
     extractFailureContext(pattern) {
+        // Try to find failed agent result
         const failedResult = pattern.agent_results.find(r => !r.success);
+        // If no failed agent result but pattern has failure_reason, use that
+        if (!failedResult && pattern.failure_reason) {
+            // Use the last agent in execution order as the failed agent
+            const failed_agent = pattern.execution_order[pattern.execution_order.length - 1];
+            const precedingAgents = pattern.execution_order.length > 1
+                ? pattern.execution_order.slice(0, -1)
+                : [];
+            return {
+                pattern_id: pattern.id,
+                objective: pattern.objective,
+                failed_agent: failed_agent,
+                error_message: pattern.failure_reason,
+                error_type: this.classifyError(pattern.failure_reason),
+                preceding_agents: precedingAgents,
+                project_context: pattern.project_context,
+                attempted_dependencies: [],
+                learned_avoidance: `${failed_agent} failed for ${pattern.objective_type} in ${pattern.project_context?.project_type || 'unknown'} project`,
+                timestamp: Date.now()
+            };
+        }
         if (!failedResult)
             return null;
         const failedIndex = pattern.execution_order.indexOf(failedResult.agent_id);
@@ -113,7 +247,8 @@ export class MahoragaMemory {
             preceding_agents: precedingAgents,
             project_context: pattern.project_context,
             attempted_dependencies: [],
-            learned_avoidance: this.generateAvoidanceRule(pattern, failedResult)
+            learned_avoidance: this.generateAvoidanceRule(pattern, failedResult),
+            timestamp: Date.now()
         };
     }
     classifyError(output) {
@@ -201,12 +336,13 @@ export class MahoragaMemory {
         score += tagSimilarity * 0.3;
         weights += 0.3;
         // Project context match (medium weight)
+        // Only add weight if both contexts exist for fair comparison
         if (projectContext?.project_type && pattern.project_context?.project_type) {
+            weights += 0.2;
             if (projectContext.project_type === pattern.project_context.project_type) {
                 score += 0.2;
             }
         }
-        weights += 0.2;
         // Objective text similarity (low weight)
         const textSimilarity = this.calculateTextSimilarity(objective, pattern.objective);
         score += textSimilarity * 0.1;
@@ -232,6 +368,178 @@ export class MahoragaMemory {
             factors.push('project_type');
         }
         return factors;
+    }
+    /**
+     * ADAPTATION 2: Add failure with chain detection
+     */
+    addFailureWithChainDetection(failure) {
+        // Add timestamp if not present
+        if (!failure.timestamp) {
+            failure.timestamp = Date.now();
+        }
+        // Clean old failures outside window
+        this.cleanOldFailures();
+        // Check for chain against existing recent failures
+        const chain = this.detectChain(failure);
+        if (chain) {
+            // Update existing chain
+            chain.failure_sequence.push(failure);
+            chain.cascading_failures.push(failure);
+            chain.total_recovery_attempts += 1;
+            chain.affected_agents = [...new Set([...chain.affected_agents, failure.failed_agent])];
+            chain.chain_pattern = this.extractChainPattern(chain.failure_sequence);
+            // Link failure to chain
+            failure.failure_chain_id = chain.chain_id;
+            failure.is_cascading_failure = true;
+            failure.caused_by_failure = chain.root_cause?.pattern_id;
+            this.failure_chains.set(chain.chain_id, chain);
+        }
+        // ALWAYS add to recent_failures for tracking (regardless of chain status)
+        this.recent_failures.push(failure);
+        return chain;
+    }
+    /**
+     * Detect if current failure is part of existing chain
+     */
+    detectChain(current_failure) {
+        // Look for recent failures (within 10 min window)
+        const recent = this.recent_failures.filter(f => (current_failure.timestamp - f.timestamp) < this.CHAIN_DETECTION_WINDOW_MS);
+        if (recent.length === 0) {
+            return null; // No recent failures, not a chain
+        }
+        // Check if any recent failure is related
+        for (const prev_failure of recent) {
+            if (this.areFailuresRelated(prev_failure, current_failure)) {
+                // Found a chain! Check if chain already exists
+                if (prev_failure.failure_chain_id) {
+                    return this.failure_chains.get(prev_failure.failure_chain_id) || null;
+                }
+                // Create new chain
+                const chain_id = `chain_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const chain = {
+                    chain_id,
+                    failure_sequence: [prev_failure],
+                    root_cause: prev_failure,
+                    cascading_failures: [],
+                    chain_pattern: this.extractChainPattern([prev_failure]),
+                    total_recovery_attempts: 1,
+                    started_at: prev_failure.timestamp,
+                    affected_agents: [prev_failure.failed_agent]
+                };
+                // Link previous failure to chain
+                prev_failure.failure_chain_id = chain_id;
+                return chain;
+            }
+        }
+        return null;
+    }
+    /**
+     * Determine if two failures are related (part of same chain)
+     */
+    areFailuresRelated(failure1, failure2) {
+        // Same objective?
+        if (failure1.objective === failure2.objective) {
+            return true;
+        }
+        // Same error type?
+        const error1 = failure1.error_type;
+        const error2 = failure2.error_type;
+        if (error1 && error2) {
+            // Check for known cascading patterns
+            if (this.isCascadingPattern(error1, error2)) {
+                return true;
+            }
+        }
+        // Same project context?
+        if (failure1.project_context && failure2.project_context) {
+            if (failure1.project_context.project_type === failure2.project_context.project_type) {
+                return true;
+            }
+        }
+        // Sequential agents in same execution?
+        const agents1 = failure1.preceding_agents;
+        const agents2 = failure2.preceding_agents;
+        const overlap = agents1.filter(a => agents2.includes(a));
+        if (overlap.length > 0) {
+            return true;
+        }
+        return false;
+    }
+    /**
+     * Known cascading failure patterns
+     */
+    isCascadingPattern(error_type1, error_type2) {
+        const CASCADING_PATTERNS = [
+            ['compilation_error', 'test_failure'], // Build fails -> tests can't run
+            ['missing_dependency', 'runtime_error'], // Missing dep -> runtime crash
+            ['configuration_error', 'deployment'], // Config wrong -> deploy fails
+            ['test_failure', 'deployment'], // Tests fail -> deploy blocked
+            ['syntax_error', 'compilation_error'], // Syntax -> compilation
+            ['network_error', 'timeout'], // Network issue -> timeout
+        ];
+        return CASCADING_PATTERNS.some(([t1, t2]) => (error_type1 === t1 && error_type2 === t2) ||
+            (error_type1 === t2 && error_type2 === t1));
+    }
+    /**
+     * Extract readable chain pattern
+     */
+    extractChainPattern(failures) {
+        const error_types = failures.map(f => f.error_type || 'unknown');
+        return error_types.join(' -> ');
+    }
+    /**
+     * Clean failures outside detection window
+     */
+    cleanOldFailures() {
+        const now = Date.now();
+        this.recent_failures = this.recent_failures.filter(f => (now - f.timestamp) < this.CHAIN_DETECTION_WINDOW_MS);
+    }
+    /**
+     * Mark chain as resolved
+     */
+    resolveChain(chain_id, resolution) {
+        const chain = this.failure_chains.get(chain_id);
+        if (chain) {
+            chain.final_resolution = resolution;
+            chain.resolved_at = Date.now();
+            chain.total_duration_ms = chain.resolved_at - chain.started_at;
+        }
+    }
+    /**
+     * Get active (unresolved) chains
+     */
+    getActiveChains() {
+        return Array.from(this.failure_chains.values()).filter(c => !c.resolved_at);
+    }
+    /**
+     * Get chain statistics
+     */
+    getChainStats() {
+        const chains = Array.from(this.failure_chains.values());
+        const active = chains.filter(c => !c.resolved_at);
+        // Calculate average chain length
+        const total_length = chains.reduce((sum, c) => sum + c.failure_sequence.length, 0);
+        const avg_chain_length = chains.length > 0 ? total_length / chains.length : 0;
+        // Find most common pattern
+        const pattern_counts = new Map();
+        for (const chain of chains) {
+            const count = pattern_counts.get(chain.chain_pattern) || 0;
+            pattern_counts.set(chain.chain_pattern, count + 1);
+        }
+        let most_common_pattern = 'none';
+        let max_count = 0;
+        for (const [pattern, count] of pattern_counts.entries()) {
+            if (count > max_count) {
+                max_count = count;
+                most_common_pattern = pattern;
+            }
+        }
+        return {
+            total_chains: chains.length,
+            active_chains: active.length,
+            avg_chain_length,
+            most_common_pattern
+        };
     }
 }
 /**
@@ -377,7 +685,8 @@ export class FailureAnalyzer {
             project_context: projectContext,
             attempted_dependencies: precedingAgents,
             suggested_fix: suggestedFix,
-            learned_avoidance: avoidance
+            learned_avoidance: avoidance,
+            timestamp: Date.now()
         };
     }
     isSimilarFailure(failure, objective, error, projectContext) {
@@ -919,5 +1228,7 @@ export class MahoragaEngine {
     }
 }
 // Singleton instance
+// Create singleton and export for testing
 export const mahoraga = new MahoragaEngine();
+export const testMemory = new MahoragaMemory();
 //# sourceMappingURL=mahoraga.js.map

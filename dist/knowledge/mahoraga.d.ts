@@ -11,19 +11,31 @@
  * 4. Adaptive Refinement - Automatically improves failed plans
  * 5. Context Awareness - Understands project context and objective similarity
  */
-import type { ExecutionPattern, FailureContext, PatternMatch, PredictiveScore, AdaptiveRefinement, AgentId, ProjectContext, OrchestrationPlan, AgentResult, Conflict, Gap } from '../types.js';
+import type { ExecutionPattern, FailureContext, FailureChain, PatternMatch, PredictiveScore, AdaptiveRefinement, AgentId, ProjectContext, OrchestrationPlan, AgentResult, Conflict, Gap } from '../types.js';
 /**
  * Mahoraga's memory - stores and retrieves execution patterns
  */
 export declare class MahoragaMemory {
     private patterns;
     private failures;
+    private failure_chains;
+    private recent_failures;
+    private readonly CHAIN_DETECTION_WINDOW_MS;
+    private kdTree;
+    private featureExtractor;
+    private readonly ROLLING_WINDOW_MS;
+    private aggregateStats;
+    constructor();
     /**
      * Record a complete execution pattern
      */
     recordPattern(pattern: ExecutionPattern): void;
     /**
      * Find patterns similar to the given objective
+     */
+    /**
+     * Find patterns similar to the given objective
+     * ADAPTATION 6: Uses KD-tree for O(log n) similarity search instead of O(n) linear search
      */
     findSimilarPatterns(objective: string, projectContext?: ProjectContext, limit?: number): PatternMatch[];
     /**
@@ -38,6 +50,37 @@ export declare class MahoragaMemory {
      * Clear old patterns (older than 30 days)
      */
     pruneOldPatterns(): void;
+    /**
+     * ADAPTATION 2: Get recent failures within the chain detection window
+     */
+    getRecentFailures(limit?: number): FailureContext[];
+    /**
+     * ADAPTATION 7: Get current aggregate statistics
+     */
+    getAggregateStats(): {
+        total_executions: number;
+        success_rate: number;
+        avg_duration_ms: number;
+        avg_tokens: number;
+        most_used_agents: Array<{
+            agent: AgentId;
+            count: number;
+        }>;
+        error_frequency: Array<{
+            error_type: string;
+            count: number;
+        }>;
+        hourly_success_rate: number[];
+        window_size_days: number;
+    };
+    /**
+     * ADAPTATION 7: Update aggregate statistics incrementally
+     */
+    private updateAggregateStats;
+    /**
+     * ADAPTATION 7: Get patterns within rolling window
+     */
+    getRollingWindowPatterns(): ExecutionPattern[];
     private extractFailureContext;
     private classifyError;
     private generateAvoidanceRule;
@@ -46,6 +89,47 @@ export declare class MahoragaMemory {
     private calculateSimilarity;
     private calculateTextSimilarity;
     private getMatchingFactors;
+    /**
+     * ADAPTATION 2: Add failure with chain detection
+     */
+    addFailureWithChainDetection(failure: FailureContext): FailureChain | null;
+    /**
+     * Detect if current failure is part of existing chain
+     */
+    private detectChain;
+    /**
+     * Determine if two failures are related (part of same chain)
+     */
+    private areFailuresRelated;
+    /**
+     * Known cascading failure patterns
+     */
+    private isCascadingPattern;
+    /**
+     * Extract readable chain pattern
+     */
+    private extractChainPattern;
+    /**
+     * Clean failures outside detection window
+     */
+    private cleanOldFailures;
+    /**
+     * Mark chain as resolved
+     */
+    resolveChain(chain_id: string, resolution: string): void;
+    /**
+     * Get active (unresolved) chains
+     */
+    getActiveChains(): FailureChain[];
+    /**
+     * Get chain statistics
+     */
+    getChainStats(): {
+        total_chains: number;
+        active_chains: number;
+        avg_chain_length: number;
+        most_common_pattern: string;
+    };
 }
 /**
  * Predictive agent selector - uses learned patterns to predict success
@@ -146,4 +230,5 @@ export declare class MahoragaEngine {
     private extractTags;
 }
 export declare const mahoraga: MahoragaEngine;
+export declare const testMemory: MahoragaMemory;
 //# sourceMappingURL=mahoraga.d.ts.map

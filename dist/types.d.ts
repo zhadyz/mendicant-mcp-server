@@ -167,6 +167,28 @@ export interface FailureContext {
     attempted_dependencies: string[];
     suggested_fix?: string;
     learned_avoidance?: string;
+    failure_chain_id?: string;
+    is_cascading_failure?: boolean;
+    caused_by_failure?: string;
+    timestamp: number;
+    recovery_attempted?: boolean;
+    recovery_success?: boolean;
+}
+/**
+ * ADAPTATION 2: Tracks a sequence of related failures for cascading failure analysis
+ */
+export interface FailureChain {
+    chain_id: string;
+    failure_sequence: FailureContext[];
+    root_cause?: FailureContext;
+    cascading_failures: FailureContext[];
+    chain_pattern: string;
+    total_recovery_attempts: number;
+    final_resolution?: string;
+    started_at: number;
+    resolved_at?: number;
+    total_duration_ms?: number;
+    affected_agents: AgentId[];
 }
 /**
  * Pattern matching score - how similar is current objective to past execution?
@@ -218,4 +240,21 @@ export interface AdaptiveRefinement {
     confidence: number;
     reasoning: string;
 }
+/**
+ * ADAPTATION 1: Multi-Dimensional Error Classification
+ * Hierarchical error sub-types for precise root cause analysis
+ */
+export type ErrorSubType = 'direct_dependency_missing' | 'transitive_dependency_missing' | 'version_conflict' | 'peer_dependency_missing' | 'null_reference' | 'undefined_property' | 'type_mismatch' | 'type_guard_failure' | 'connection_refused' | 'connection_timeout' | 'dns_resolution_failed' | 'ssl_certificate_error' | 'missing_env_var' | 'invalid_config_value' | 'config_file_not_found' | 'config_parse_error' | 'unknown_sub_type';
+/**
+ * Error domain - which layer of the system failed?
+ */
+export type ErrorDomain = 'build' | 'runtime' | 'deployment' | 'test' | 'security' | 'data' | 'network' | 'configuration';
+/**
+ * Error severity - how critical is this?
+ */
+export type SeverityLevel = 'critical' | 'high' | 'medium' | 'low';
+/**
+ * Recovery strategy - what should we do about this error?
+ */
+export type RecoveryStrategy = 'retry' | 'retry_backoff' | 'fallback' | 'manual' | 'skip' | 'abort';
 //# sourceMappingURL=types.d.ts.map
