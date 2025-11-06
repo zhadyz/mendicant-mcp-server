@@ -194,6 +194,31 @@ export interface FailureContext {
   attempted_dependencies: string[];
   suggested_fix?: string;
   learned_avoidance?: string; // What to avoid in future
+
+  // ADAPTATION 2: Chain tracking fields
+  failure_chain_id?: string;              // Links to FailureChain
+  is_cascading_failure?: boolean;         // Caused by previous failure?
+  caused_by_failure?: string;             // ID of causal failure
+  timestamp: number;                      // When this occurred
+  recovery_attempted?: boolean;           // Did we try to recover?
+  recovery_success?: boolean;             // Did recovery work?
+}
+
+/**
+ * ADAPTATION 2: Tracks a sequence of related failures for cascading failure analysis
+ */
+export interface FailureChain {
+  chain_id: string;                       // Unique identifier
+  failure_sequence: FailureContext[];     // Chronological failures
+  root_cause?: FailureContext;            // First failure in chain
+  cascading_failures: FailureContext[];   // Failures caused by root
+  chain_pattern: string;                  // e.g., "build_error -> test_failure"
+  total_recovery_attempts: number;        // How many times we tried
+  final_resolution?: string;              // How it was resolved
+  started_at: number;                     // Timestamp of first failure
+  resolved_at?: number;                   // Timestamp of resolution
+  total_duration_ms?: number;             // Time to resolve
+  affected_agents: AgentId[];             // All agents involved
 }
 
 /**
@@ -241,3 +266,60 @@ export interface AdaptiveRefinement {
   confidence: number;
   reasoning: string;
 }
+
+/**
+ * ADAPTATION 1: Multi-Dimensional Error Classification
+ * Hierarchical error sub-types for precise root cause analysis
+ */
+export type ErrorSubType =
+  // Missing dependency sub-types
+  | 'direct_dependency_missing'
+  | 'transitive_dependency_missing'
+  | 'version_conflict'
+  | 'peer_dependency_missing'
+  // Type error sub-types
+  | 'null_reference'
+  | 'undefined_property'
+  | 'type_mismatch'
+  | 'type_guard_failure'
+  // Network error sub-types
+  | 'connection_refused'
+  | 'connection_timeout'
+  | 'dns_resolution_failed'
+  | 'ssl_certificate_error'
+  // Configuration error sub-types
+  | 'missing_env_var'
+  | 'invalid_config_value'
+  | 'config_file_not_found'
+  | 'config_parse_error'
+  // Generic fallback
+  | 'unknown_sub_type';
+
+/**
+ * Error domain - which layer of the system failed?
+ */
+export type ErrorDomain =
+  | 'build'        // Compilation, bundling, transpilation
+  | 'runtime'      // Execution-time failures
+  | 'deployment'   // CI/CD, infrastructure
+  | 'test'         // Test execution failures
+  | 'security'     // Auth, permissions, vulnerabilities
+  | 'data'         // Database, file I/O
+  | 'network'      // HTTP, WebSocket, DNS
+  | 'configuration'; // Environment, config files
+
+/**
+ * Error severity - how critical is this?
+ */
+export type SeverityLevel = 'critical' | 'high' | 'medium' | 'low';
+
+/**
+ * Recovery strategy - what should we do about this error?
+ */
+export type RecoveryStrategy =
+  | 'retry'           // Immediate retry (transient failures)
+  | 'retry_backoff'   // Retry with exponential backoff
+  | 'fallback'        // Use alternative approach
+  | 'manual'          // Requires human intervention
+  | 'skip'            // Can be safely skipped
+  | 'abort';          // Must stop execution

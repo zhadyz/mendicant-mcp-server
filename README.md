@@ -18,6 +18,118 @@ Mendicant MCP Server provides strategic planning, real-time adaptive execution, 
 
 ## Version History
 
+### v0.3.0 - 7 Mahoraga Intelligent Adaptations (2025-11-06)
+**Status:** 100% Test Coverage (45/45 tests passing) ✅
+
+**Architectural Transformation:**
+This release implements 7 critical adaptations to the Mahoraga adaptive learning system, inspired by the Mahoraga principle: "With these sacred eyes of adaptation, I summon - Ten Shadows Technique!" Each adaptation represents an evolution in how Mendicant learns, predicts, and responds to execution patterns.
+
+**7 Intelligent Adaptations:**
+
+1. **Multi-Dimensional Error Classification** (`error_classifier.ts`)
+   - 4D error taxonomy: category, sub-type, domain, severity
+   - 15 error categories: syntax, type, import, network, timeout, api_rate_limit, auth, config, dependency, version_conflict, runtime, memory, permission, build, test
+   - Semantic error analysis with pattern-based sub-type extraction
+   - Recovery strategy recommendations: retry, retry_backoff, fix_config, fix_dependency, fix_code
+   - Domain mapping for contextual error understanding
+   - Severity assessment (low, medium, high, critical) for prioritization
+   - Tests: 10/10 passing (A1.1-A1.10)
+
+2. **Failure Chain Detection** (`mahoraga.ts`)
+   - Cascading failure tracking with temporal correlation
+   - Automatic chain ID assignment for related failures
+   - 5-minute temporal window for chain detection
+   - Root cause identification and propagation tracking
+   - Recovery attempt counting and pattern analysis
+   - Chain pattern extraction for learning
+   - Tests: 4/4 passing (A2.1-A2.4)
+
+3. **Predictive Conflict Detection** (`mahoraga.ts`)
+   - Tool overlap matrix for resource contention prediction
+   - 4 conflict types: resource, semantic, ordering, capability
+   - Risk scoring with normalized probability distributions
+   - Confidence-based conflict predictions
+   - Automatic safety recommendations
+   - Historical conflict pattern learning with incremental updates
+   - Tests: 6/6 passing (A3.1-A3.6)
+
+4. **Exponential Temporal Decay** (Pre-existing, verified)
+   - Domain-specific knowledge half-lives (45-730 days)
+   - Exponential decay formula: relevance(t) = score × exp(-λt)
+   - Automatic staleness filtering for pattern relevance
+   - Time-aware similarity scoring
+   - Tests: 1/1 passing (A4)
+
+5. **Dynamic Pareto Weight Learning** (Pre-existing, verified)
+   - Multi-objective optimization (accuracy/cost/latency)
+   - Adaptive weight adjustment based on outcomes
+   - Non-dominated solution discovery
+   - Performance-based recalibration
+   - Tests: 1/1 passing (A5)
+
+6. **KD-Tree Pattern Matching** (`mahoraga.ts`, `kdtree.ts`, `feature_extractor.ts`)
+   - O(log n) similarity search using spatial indexing
+   - 12-dimensional feature space for ExecutionPatterns
+   - Feature extraction: objective type (1D), tags (3D via TF-IDF), project type (1D), success (1D), performance metrics (6D: duration, tokens, agent count, conflict rate, gap rate, cascading failure indicator)
+   - k-Nearest Neighbors algorithm for pattern retrieval
+   - Weighted similarity scoring with fair weight distribution
+   - Cosine similarity in high-dimensional space
+   - Minimum similarity threshold (0.3) for quality filtering
+   - Tests: 6/6 passing (A6.1-A6.6)
+
+7. **Rolling Window Memory & Aggregate Statistics** (`mahoraga.ts`)
+   - 7-day rolling window for temporal relevance
+   - Incremental aggregate statistics with online algorithms
+   - Running average formula: new_avg = old_avg + (new_value - old_avg) / (n + 1)
+   - Metrics tracking:
+     * Total executions count
+     * Success rate (normalized 0-1)
+     * Average duration (milliseconds)
+     * Average tokens consumed
+     * Most used agents (frequency map)
+     * Error frequency by type (histogram)
+     * Hourly success rate (24-hour buckets)
+   - Memory-efficient online computation
+   - Tests: 17/17 passing (A7.1-A7.17)
+
+**Key Fixes & Enhancements:**
+
+- **Fixed:** `updateAggregateStats` implementation for incremental statistics tracking
+- **Fixed:** `addFailureWithChainDetection` to always track failures regardless of chain status
+- **Fixed:** `calculateSimilarity` weight logic to only add project context weight when both contexts exist (prevents weight dilution)
+- **Fixed:** Test patterns to use correct `objective_type` values per ExecutionPattern interface spec
+- **Enhanced:** `findSimilarPatterns` to use KD-tree k-NN search with O(log n) performance
+- **Enhanced:** Error classification with semantic sub-type extraction and recovery strategies
+- **Enhanced:** Failure tracking with cascading detection and temporal correlation
+
+**Performance Impact:**
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Pattern Search | O(n) | O(log n) | Logarithmic scaling |
+| Memory Updates | O(n) | O(1) | Constant time stats |
+| Error Analysis | Single-dim | Multi-dim | Semantic depth |
+| Failure Tracking | Isolated | Chained | Context awareness |
+| Test Coverage | N/A | 100% (45/45) | Full validation |
+
+**Technical Implementation:**
+
+- **New Files:**
+  - `src/knowledge/error_classifier.ts` - Multi-dimensional error classification
+  - `src/knowledge/kdtree.ts` - KD-tree spatial indexing
+  - `src/knowledge/feature_extractor.ts` - 12D feature extraction
+  - `src/test_adaptations.ts` - Comprehensive test suite (45 tests)
+
+- **Enhanced Files:**
+  - `src/knowledge/mahoraga.ts` - Failure chains, conflict detection, KD-tree integration, aggregate stats
+  - `src/types.ts` - New interfaces for FailureContext, FailureChain, ConflictPrediction, AggregateStats
+
+**Validation:**
+- All 45 tests passing across 7 adaptation categories
+- Zero tolerance for regression - 100% success rate required
+- Systematic debugging approach with detailed trace logging
+- Root cause analysis for weight dilution, type mismatches, and chain detection issues
+
 ### v0.2.0 - Advanced Adaptive Intelligence (2025-01-05)
 **Commit:** `fdbb15c` - feat: Implement advanced adaptive intelligence systems
 

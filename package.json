@@ -1,6 +1,6 @@
 {
   "name": "mendicant-mcp-server",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "description": "MCP Server for mendicant_bias orchestration intelligence - orchestrates AI agents for complex software tasks",
   "main": "dist/index.js",
   "type": "module",

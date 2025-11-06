@@ -1,603 +1,237 @@
-/**
- * Predictive Conflict Detector - Learn and Predict Agent Conflicts
- *
- * Some agents conflict with each other:
- * - Resource conflicts: Both modify the same file
- * - Semantic conflicts: Contradictory approaches
- * - Ordering conflicts: Agent B needs Agent A's output
- * - Capability overlaps: Redundant work
- *
- * This system:
- * 1. Learns conflict patterns from past executions
- * 2. Predicts conflicts BEFORE execution
- * 3. Suggests conflict resolution strategies
- * 4. Optimizes agent ordering to prevent conflicts
- *
- * Makes Mendicant proactive about conflicts, not reactive.
+﻿/**
+ * PREDICTIVE CONFLICT DETECTOR - ADAPTATION 3
  */
 
-import { AgentId, ExecutionPattern, ProjectContext } from '../types.js';
-import { semanticEmbedder, SemanticEmbedding } from './semantic_embedder.js';
+import type { AgentId, ProjectContext } from '../types.js';
+
+export interface ToolOverlapMatrix {
+  agent_tools: Map<AgentId, Set<string>>;
+  tool_conflicts: Map<string, Set<string>>;
+  learned_conflicts: ConflictPattern[];
+}
 
 export interface ConflictPattern {
   agent_a: AgentId;
   agent_b: AgentId;
-  conflict_type: ConflictType;
-  severity: number; // 0.0 to 1.0
-  frequency: number; // How often this conflict occurs
-  last_seen: number; // Timestamp
-  resolution_strategies: ResolutionStrategy[];
-  context_tags: string[]; // When does this conflict happen
-}
-
-export type ConflictType =
-  | 'resource_contention'     // Both agents accessing same resource
-  | 'semantic_contradiction'  // Agents have contradictory goals
-  | 'ordering_dependency'     // Agent B needs Agent A first
-  | 'capability_overlap'      // Agents do redundant work
-  | 'unknown';
-
-export interface ResolutionStrategy {
-  strategy: 'reorder' | 'remove' | 'serialize' | 'parallelize' | 'merge';
-  description: string;
-  confidence: number;
-  success_rate: number; // Historical success of this strategy
+  conflict_type: 'resource' | 'semantic' | 'ordering' | 'tool_overlap';
+  probability: number;
+  observed_count: number;
+  success_with_ordering?: { a_before_b: boolean; success_rate: number; };
+  context_factors?: string[];
+  last_observed: number;
 }
 
 export interface ConflictPrediction {
-  agent_pair: [AgentId, AgentId];
-  conflict_probability: number; // 0.0 to 1.0
-  predicted_type: ConflictType;
-  predicted_severity: number;
-  confidence: number;
-  reasoning: string;
-  recommended_resolution: ResolutionStrategy;
-}
-
-export interface ConflictAnalysis {
-  predicted_conflicts: ConflictPrediction[];
+  predicted_conflicts: ConflictPattern[];
+  risk_score: number;
   conflict_free_probability: number;
   recommended_reordering?: AgentId[];
   agents_to_remove?: AgentId[];
-  reasoning: string;
+  warnings: string[];
+  safe_to_execute: boolean;
 }
 
-/**
- * Predictive Conflict Detector - Learn and predict agent conflicts
- */
 export class PredictiveConflictDetector {
-  private conflict_patterns: Map<string, ConflictPattern> = new Map();
-  private resolution_success: Map<string, number> = new Map(); // Strategy → success rate
+  private tool_matrix: ToolOverlapMatrix;
+  private conflict_patterns: Map<string, ConflictPattern>;
+  private readonly DECAY_HALF_LIFE_DAYS = 30;
+  private readonly RISK_THRESHOLD_LOW = 0.3;
+  private readonly RISK_THRESHOLD_MEDIUM = 0.6;
+  private readonly RISK_THRESHOLD_HIGH = 0.8;
 
-  /**
-   * Analyze a planned agent sequence for potential conflicts
-   */
-  async analyzeConflicts(
-    agents: AgentId[],
-    objective: string,
-    objective_embedding: SemanticEmbedding,
-    context?: ProjectContext
-  ): Promise<ConflictAnalysis> {
-    console.log(`[ConflictDetector] Analyzing ${agents.length} agents for conflicts`);
+  constructor() {
+    this.tool_matrix = { agent_tools: new Map(), tool_conflicts: new Map(), learned_conflicts: [] };
+    this.conflict_patterns = new Map();
+    this.initializeKnownToolConflicts();
+    this.initializeAgentToolMappings();
+  }
 
-    const predictions: ConflictPrediction[] = [];
+  async analyzeConflicts(agents: AgentId[], objective: string, semanticEmbedding: any, context?: ProjectContext): Promise<ConflictPrediction> {
+    const predicted_conflicts: ConflictPattern[] = [];
+    const warnings: string[] = [];
+    const agents_to_remove: AgentId[] = [];
 
-    // Check each pair of agents
     for (let i = 0; i < agents.length; i++) {
       for (let j = i + 1; j < agents.length; j++) {
-        const agent_a = agents[i];
-        const agent_b = agents[j];
+        const agent_a = agents[i], agent_b = agents[j];
+        const pattern = this.getConflictPattern(agent_a, agent_b);
+        if (pattern) {
+          const decayed_probability = this.applyTemporalDecay(pattern);
+          if (decayed_probability > this.RISK_THRESHOLD_LOW) {
+            predicted_conflicts.push({ ...pattern, probability: decayed_probability });
 
-        const prediction = await this.predictConflict(
-          agent_a,
-          agent_b,
-          objective_embedding,
-          context
-        );
-
-        if (prediction.conflict_probability > 0.3) {
-          predictions.push(prediction);
-        }
-      }
-    }
-
-    // Sort by probability (highest first)
-    predictions.sort((a, b) => b.conflict_probability - a.conflict_probability);
-
-    // Calculate overall conflict-free probability
-    const conflict_free_prob = this.calculateConflictFreeProbability(predictions);
-
-    console.log(`[ConflictDetector] Found ${predictions.length} potential conflicts`);
-    console.log(`[ConflictDetector] Conflict-free probability: ${(conflict_free_prob * 100).toFixed(1)}%`);
-
-    // Generate recommendations
-    let recommended_reordering: AgentId[] | undefined;
-    let agents_to_remove: AgentId[] | undefined;
-    let reasoning = '';
-
-    if (predictions.length > 0) {
-      // Try to resolve conflicts
-      const resolution = this.generateResolution(agents, predictions);
-      recommended_reordering = resolution.reordering;
-      agents_to_remove = resolution.removals;
-      reasoning = resolution.reasoning;
-    } else {
-      reasoning = 'No conflicts detected - plan is optimal';
-    }
-
-    return {
-      predicted_conflicts: predictions,
-      conflict_free_probability: conflict_free_prob,
-      recommended_reordering,
-      agents_to_remove,
-      reasoning
-    };
-  }
-
-  /**
-   * Predict conflict between two agents
-   */
-  private async predictConflict(
-    agent_a: AgentId,
-    agent_b: AgentId,
-    objective_embedding: SemanticEmbedding,
-    context?: ProjectContext
-  ): Promise<ConflictPrediction> {
-    // Check historical patterns
-    const pattern_key = this.getPatternKey(agent_a, agent_b);
-    const historical_pattern = this.conflict_patterns.get(pattern_key);
-
-    if (historical_pattern) {
-      // Use learned pattern
-      const base_probability = Math.min(historical_pattern.frequency * 0.2, 0.9);
-
-      // Adjust for context similarity
-      const context_match = this.matchContext(historical_pattern.context_tags, objective_embedding, context);
-      const adjusted_probability = base_probability * (0.7 + context_match * 0.3);
-
-      const best_resolution = this.selectBestResolution(historical_pattern.resolution_strategies);
-
-      return {
-        agent_pair: [agent_a, agent_b],
-        conflict_probability: adjusted_probability,
-        predicted_type: historical_pattern.conflict_type,
-        predicted_severity: historical_pattern.severity,
-        confidence: 0.8, // High confidence - based on historical data
-        reasoning: `Historical pattern: ${historical_pattern.frequency} conflicts observed, type: ${historical_pattern.conflict_type}`,
-        recommended_resolution: best_resolution
-      };
-    }
-
-    // No historical data - use heuristics
-    return this.heuristicConflictPrediction(agent_a, agent_b, objective_embedding, context);
-  }
-
-  /**
-   * Heuristic conflict prediction (when no historical data)
-   */
-  private heuristicConflictPrediction(
-    agent_a: AgentId,
-    agent_b: AgentId,
-    objective_embedding: SemanticEmbedding,
-    context?: ProjectContext
-  ): ConflictPrediction {
-    let probability = 0.0;
-    let type: ConflictType = 'unknown';
-    let severity = 0.3;
-    let reasoning = '';
-
-    // Heuristic 1: Same capability agents may overlap
-    if (this.haveSimilarCapabilities(agent_a, agent_b)) {
-      probability += 0.4;
-      type = 'capability_overlap';
-      severity = 0.5;
-      reasoning = 'Agents have similar capabilities - may perform redundant work';
-    }
-
-    // Heuristic 2: Known ordering dependencies
-    if (this.hasOrderingDependency(agent_a, agent_b)) {
-      probability += 0.6;
-      type = 'ordering_dependency';
-      severity = 0.7;
-      reasoning = 'Known ordering dependency - execution order matters';
-    }
-
-    // Heuristic 3: Resource-intensive agents may conflict
-    if (this.areResourceIntensive(agent_a, agent_b)) {
-      probability += 0.3;
-      type = 'resource_contention';
-      severity = 0.6;
-      reasoning = 'Both agents are resource-intensive - may contend for resources';
-    }
-
-    // Heuristic 4: Semantic contradiction
-    if (this.haveContradictorySemantics(agent_a, agent_b)) {
-      probability += 0.5;
-      type = 'semantic_contradiction';
-      severity = 0.8;
-      reasoning = 'Agents have contradictory approaches';
-    }
-
-    probability = Math.min(probability, 1.0);
-
-    // Generate resolution strategy
-    const resolution = this.generateResolutionStrategy(type, severity);
-
-    return {
-      agent_pair: [agent_a, agent_b],
-      conflict_probability: probability,
-      predicted_type: type,
-      predicted_severity: severity,
-      confidence: 0.4, // Lower confidence - heuristic-based
-      reasoning: reasoning || 'No specific conflict detected',
-      recommended_resolution: resolution
-    };
-  }
-
-  /**
-   * Check if agents have similar capabilities
-   */
-  private haveSimilarCapabilities(agent_a: AgentId, agent_b: AgentId): boolean {
-    // Extract capability keywords
-    const keywords_a = agent_a.toLowerCase().split('_');
-    const keywords_b = agent_b.toLowerCase().split('_');
-
-    // Check for overlap
-    const overlap = keywords_a.filter(k => keywords_b.includes(k));
-    return overlap.length > 0;
-  }
-
-  /**
-   * Check for known ordering dependencies
-   */
-  private hasOrderingDependency(agent_a: AgentId, agent_b: AgentId): boolean {
-    // Known dependencies (would be learned over time in full system)
-    const dependencies: Record<string, string[]> = {
-      'analyzer': ['implementation', 'debug'],      // Analyze before implementing
-      'debug': ['test'],                            // Debug before testing
-      'implementation': ['test', 'deploy'],         // Implement before testing/deploying
-      'test': ['deploy'],                           // Test before deploying
-    };
-
-    // Check if agent_a should come before agent_b
-    for (const [prereq, dependents] of Object.entries(dependencies)) {
-      if (agent_a.toLowerCase().includes(prereq)) {
-        for (const dependent of dependents) {
-          if (agent_b.toLowerCase().includes(dependent)) {
-            return true;
+            if (decayed_probability > this.RISK_THRESHOLD_HIGH && !pattern.success_with_ordering) {
+              if (!agents_to_remove.includes(agent_b)) {
+                agents_to_remove.push(agent_b);
+              }
+            }
           }
         }
+        const overlap = this.calculateToolOverlap(agent_a, agent_b);
+        if (overlap.score > 0.5) warnings.push('Tool overlap detected');
       }
     }
 
-    return false;
+    const risk_score = this.calculateRiskScore(predicted_conflicts);
+    const conflict_free_probability = 1.0 - risk_score;
+    let recommended_reordering: AgentId[] | undefined;
+    if (predicted_conflicts.length > 0) recommended_reordering = this.optimizeOrdering(agents, predicted_conflicts);
+
+    return {
+      predicted_conflicts,
+      risk_score,
+      conflict_free_probability,
+      recommended_reordering,
+      agents_to_remove: agents_to_remove.length > 0 ? agents_to_remove : undefined,
+      warnings,
+      safe_to_execute: risk_score < this.RISK_THRESHOLD_HIGH
+    };
   }
 
-  /**
-   * Check if agents are resource-intensive
-   */
-  private areResourceIntensive(agent_a: AgentId, agent_b: AgentId): boolean {
-    const intensive_keywords = ['six_eyes', 'limitless', 'mahoraga', 'construction', 'domain_expansion'];
+  predictConflicts(agents: AgentId[], context?: ProjectContext): ConflictPrediction {
+    const predicted_conflicts: ConflictPattern[] = [];
+    const warnings: string[] = [];
+    const agents_to_remove: AgentId[] = [];
 
-    const a_intensive = intensive_keywords.some(k => agent_a.toLowerCase().includes(k));
-    const b_intensive = intensive_keywords.some(k => agent_b.toLowerCase().includes(k));
+    for (let i = 0; i < agents.length; i++) {
+      for (let j = i + 1; j < agents.length; j++) {
+        const agent_a = agents[i], agent_b = agents[j];
+        const pattern = this.getConflictPattern(agent_a, agent_b);
+        if (pattern) {
+          const decayed_probability = this.applyTemporalDecay(pattern);
+          if (decayed_probability > this.RISK_THRESHOLD_LOW) {
+            predicted_conflicts.push({ ...pattern, probability: decayed_probability });
 
-    return a_intensive && b_intensive;
-  }
-
-  /**
-   * Check if agents have contradictory semantics
-   */
-  private haveContradictorySemantics(agent_a: AgentId, agent_b: AgentId): boolean {
-    const contradictions: Array<[string, string]> = [
-      ['create', 'delete'],
-      ['add', 'remove'],
-      ['build', 'destroy'],
-      ['implement', 'rollback'],
-    ];
-
-    const a_lower = agent_a.toLowerCase();
-    const b_lower = agent_b.toLowerCase();
-
-    for (const [action1, action2] of contradictions) {
-      if ((a_lower.includes(action1) && b_lower.includes(action2)) ||
-          (a_lower.includes(action2) && b_lower.includes(action1))) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Generate resolution strategy for conflict type
-   */
-  private generateResolutionStrategy(type: ConflictType, severity: number): ResolutionStrategy {
-    switch (type) {
-      case 'ordering_dependency':
-        return {
-          strategy: 'reorder',
-          description: 'Reorder agents to respect dependency',
-          confidence: 0.8,
-          success_rate: 0.85
-        };
-
-      case 'capability_overlap':
-        return {
-          strategy: 'remove',
-          description: 'Remove redundant agent',
-          confidence: 0.7,
-          success_rate: 0.75
-        };
-
-      case 'resource_contention':
-        return {
-          strategy: 'serialize',
-          description: 'Execute agents sequentially to avoid resource conflicts',
-          confidence: 0.75,
-          success_rate: 0.8
-        };
-
-      case 'semantic_contradiction':
-        return {
-          strategy: 'remove',
-          description: 'Remove conflicting agent',
-          confidence: 0.9,
-          success_rate: 0.9
-        };
-
-      default:
-        return {
-          strategy: 'reorder',
-          description: 'Try reordering agents',
-          confidence: 0.5,
-          success_rate: 0.6
-        };
-    }
-  }
-
-  /**
-   * Calculate overall conflict-free probability
-   */
-  private calculateConflictFreeProbability(predictions: ConflictPrediction[]): number {
-    if (predictions.length === 0) return 1.0;
-
-    // Assume independent conflicts
-    let prob_no_conflict = 1.0;
-    for (const pred of predictions) {
-      prob_no_conflict *= (1.0 - pred.conflict_probability);
-    }
-
-    return prob_no_conflict;
-  }
-
-  /**
-   * Generate resolution for conflicts
-   */
-  private generateResolution(
-    agents: AgentId[],
-    conflicts: ConflictPrediction[]
-  ): { reordering?: AgentId[]; removals?: AgentId[]; reasoning: string } {
-    let reasoning = `Detected ${conflicts.length} conflict(s). `;
-
-    // Strategy 1: If high-severity conflicts, suggest removals
-    const high_severity = conflicts.filter(c => c.predicted_severity > 0.7);
-    if (high_severity.length > 0) {
-      const agents_to_remove = this.identifyAgentsToRemove(high_severity, agents);
-      reasoning += `Recommend removing ${agents_to_remove.length} conflicting agent(s) to prevent high-severity conflicts.`;
-      return { removals: agents_to_remove, reasoning };
-    }
-
-    // Strategy 2: If ordering dependencies, suggest reordering
-    const ordering_conflicts = conflicts.filter(c => c.predicted_type === 'ordering_dependency');
-    if (ordering_conflicts.length > 0) {
-      const reordered = this.reorderAgents(agents, ordering_conflicts);
-      reasoning += `Recommend reordering agents to respect dependencies.`;
-      return { reordering: reordered, reasoning };
-    }
-
-    // Strategy 3: Mixed conflicts - apply best resolution
-    const best_resolution = conflicts[0].recommended_resolution;
-    reasoning += `Apply ${best_resolution.strategy} strategy: ${best_resolution.description}`;
-
-    if (best_resolution.strategy === 'remove') {
-      const agents_to_remove = this.identifyAgentsToRemove(conflicts, agents);
-      return { removals: agents_to_remove, reasoning };
-    } else if (best_resolution.strategy === 'reorder') {
-      const reordered = this.reorderAgents(agents, conflicts);
-      return { reordering: reordered, reasoning };
-    }
-
-    return { reasoning };
-  }
-
-  /**
-   * Identify agents to remove to resolve conflicts
-   */
-  private identifyAgentsToRemove(conflicts: ConflictPrediction[], agents: AgentId[]): AgentId[] {
-    const conflict_counts = new Map<AgentId, number>();
-
-    // Count conflicts for each agent
-    for (const conflict of conflicts) {
-      const [a, b] = conflict.agent_pair;
-      conflict_counts.set(a, (conflict_counts.get(a) || 0) + 1);
-      conflict_counts.set(b, (conflict_counts.get(b) || 0) + 1);
-    }
-
-    // Remove agents with most conflicts
-    const sorted = Array.from(conflict_counts.entries())
-      .sort((a, b) => b[1] - a[1]);
-
-    // Remove top conflicting agents (max 2)
-    return sorted.slice(0, 2).map(([agent, _]) => agent);
-  }
-
-  /**
-   * Reorder agents to respect dependencies
-   */
-  private reorderAgents(agents: AgentId[], conflicts: ConflictPrediction[]): AgentId[] {
-    const reordered = [...agents];
-
-    // Apply ordering dependencies
-    for (const conflict of conflicts) {
-      if (conflict.predicted_type === 'ordering_dependency') {
-        const [agent_a, agent_b] = conflict.agent_pair;
-
-        const idx_a = reordered.indexOf(agent_a);
-        const idx_b = reordered.indexOf(agent_b);
-
-        // Ensure agent_a comes before agent_b
-        if (idx_a > idx_b) {
-          reordered.splice(idx_a, 1);
-          reordered.splice(idx_b, 0, agent_a);
+            if (decayed_probability > this.RISK_THRESHOLD_HIGH && !pattern.success_with_ordering) {
+              if (!agents_to_remove.includes(agent_b)) {
+                agents_to_remove.push(agent_b);
+              }
+            }
+          }
         }
+        const overlap = this.calculateToolOverlap(agent_a, agent_b);
+        if (overlap.score > 0.5) warnings.push('Tool overlap detected');
       }
     }
 
-    return reordered;
+    const risk_score = this.calculateRiskScore(predicted_conflicts);
+    const conflict_free_probability = 1.0 - risk_score;
+    let recommended_reordering: AgentId[] | undefined;
+    if (predicted_conflicts.length > 0) recommended_reordering = this.optimizeOrdering(agents, predicted_conflicts);
+
+    return {
+      predicted_conflicts,
+      risk_score,
+      conflict_free_probability,
+      recommended_reordering,
+      agents_to_remove: agents_to_remove.length > 0 ? agents_to_remove : undefined,
+      warnings,
+      safe_to_execute: risk_score < this.RISK_THRESHOLD_HIGH
+    };
   }
 
-  /**
-   * Learn from observed conflicts
-   */
-  async learnConflict(
-    agent_a: AgentId,
-    agent_b: AgentId,
-    conflict_type: ConflictType,
-    severity: number,
-    context_tags: string[],
-    resolution_used?: ResolutionStrategy,
-    resolution_success?: boolean
-  ): Promise<void> {
+  async learnConflict(agent_a: AgentId, agent_b: AgentId, conflict_type: 'resource' | 'semantic' | 'ordering' | 'tool_overlap', was_resolved: boolean): Promise<void> {
     const pattern_key = this.getPatternKey(agent_a, agent_b);
     const existing = this.conflict_patterns.get(pattern_key);
-
     if (existing) {
-      // Update existing pattern
-      existing.frequency += 1;
-      existing.last_seen = Date.now();
-
-      // Update severity (exponential moving average)
-      existing.severity = existing.severity * 0.8 + severity * 0.2;
-
-      // Add context tags
-      for (const tag of context_tags) {
-        if (!existing.context_tags.includes(tag)) {
-          existing.context_tags.push(tag);
-        }
-      }
-
-      // Update resolution strategies
-      if (resolution_used && resolution_success !== undefined) {
-        const idx = existing.resolution_strategies.findIndex(
-          s => s.strategy === resolution_used.strategy
-        );
-
-        if (idx >= 0) {
-          const strategy = existing.resolution_strategies[idx];
-          const new_success_rate = strategy.success_rate * 0.9 + (resolution_success ? 1.0 : 0.0) * 0.1;
-          strategy.success_rate = new_success_rate;
-        } else {
-          existing.resolution_strategies.push({
-            ...resolution_used,
-            success_rate: resolution_success ? 1.0 : 0.0
-          });
-        }
-      }
+      const alpha = 0.3;
+      existing.probability = existing.probability * (1 - alpha) + (was_resolved ? 0.0 : 1.0) * alpha;
+      existing.observed_count += 1;
+      existing.last_observed = Date.now();
+      this.conflict_patterns.set(pattern_key, existing);
     } else {
-      // Create new pattern
-      const new_pattern: ConflictPattern = {
-        agent_a,
-        agent_b,
-        conflict_type,
-        severity,
-        frequency: 1,
-        last_seen: Date.now(),
-        resolution_strategies: resolution_used ? [{
-          ...resolution_used,
-          success_rate: resolution_success ? 1.0 : 0.0
-        }] : [],
-        context_tags
-      };
-
+      const new_pattern: ConflictPattern = { agent_a, agent_b, conflict_type, probability: was_resolved ? 0.3 : 0.8, observed_count: 1, last_observed: Date.now() };
       this.conflict_patterns.set(pattern_key, new_pattern);
     }
-
-    console.log(`[ConflictDetector] Learned conflict: ${agent_a} <-> ${agent_b} (${conflict_type}, severity: ${severity.toFixed(2)})`);
+    this.tool_matrix.learned_conflicts = Array.from(this.conflict_patterns.values());
   }
 
-  /**
-   * Get pattern key for agent pair (order-independent)
-   */
-  private getPatternKey(agent_a: AgentId, agent_b: AgentId): string {
-    return [agent_a, agent_b].sort().join('::');
+  private calculateToolOverlap(agent_a: AgentId, agent_b: AgentId): { score: number; conflicting_tools: string[]; } {
+    const tools_a = this.tool_matrix.agent_tools.get(agent_a) || new Set();
+    const tools_b = this.tool_matrix.agent_tools.get(agent_b) || new Set();
+    const overlapping = new Set<string>();
+    for (const tool of tools_a) if (tools_b.has(tool)) overlapping.add(tool);
+    const conflicting_tools: string[] = Array.from(overlapping);
+    const total_tools = tools_a.size + tools_b.size;
+    return { score: total_tools > 0 ? (overlapping.size / total_tools) : 0, conflicting_tools };
   }
 
-  /**
-   * Match context tags for similarity
-   */
-  private matchContext(
-    pattern_tags: string[],
-    objective_embedding: SemanticEmbedding,
-    context?: ProjectContext
-  ): number {
-    // Simple tag matching (would use semantic similarity in full system)
-    const current_tags = [
-      ...Array.from(objective_embedding.intent_scores.keys()),
-      ...Array.from(objective_embedding.domain_scores.keys()),
-      context?.project_type || ''
-    ];
-
-    const matches = pattern_tags.filter(tag => current_tags.includes(tag));
-    return pattern_tags.length > 0 ? matches.length / pattern_tags.length : 0.5;
-  }
-
-  /**
-   * Select best resolution strategy from history
-   */
-  private selectBestResolution(strategies: ResolutionStrategy[]): ResolutionStrategy {
-    if (strategies.length === 0) {
-      return {
-        strategy: 'reorder',
-        description: 'Try reordering agents',
-        confidence: 0.5,
-        success_rate: 0.6
-      };
-    }
-
-    // Select strategy with highest success rate
-    return strategies.reduce((best, current) =>
-      current.success_rate > best.success_rate ? current : best
-    );
-  }
-
-  /**
-   * Get all learned conflict patterns
-   */
-  getConflictPatterns(): ConflictPattern[] {
-    return Array.from(this.conflict_patterns.values());
-  }
-
-  /**
-   * Clear old conflict patterns
-   */
-  pruneOldPatterns(max_age_days: number = 90): number {
-    const cutoff = Date.now() - (max_age_days * 24 * 60 * 60 * 1000);
-    let pruned = 0;
-
-    for (const [key, pattern] of this.conflict_patterns.entries()) {
-      if (pattern.last_seen < cutoff) {
-        this.conflict_patterns.delete(key);
-        pruned += 1;
+  private optimizeOrdering(agents: AgentId[], conflicts: ConflictPattern[]): AgentId[] {
+    const graph = new Map<AgentId, Set<AgentId>>();
+    const in_degree = new Map<AgentId, number>();
+    for (const agent of agents) { graph.set(agent, new Set()); in_degree.set(agent, 0); }
+    for (const conflict of conflicts) {
+      if (conflict.success_with_ordering) {
+        const { a_before_b } = conflict.success_with_ordering;
+        if (a_before_b) {
+          const edges = graph.get(conflict.agent_a)!;
+          if (!edges.has(conflict.agent_b)) { edges.add(conflict.agent_b); in_degree.set(conflict.agent_b, (in_degree.get(conflict.agent_b) || 0) + 1); }
+        } else {
+          const edges = graph.get(conflict.agent_b)!;
+          if (!edges.has(conflict.agent_a)) { edges.add(conflict.agent_a); in_degree.set(conflict.agent_a, (in_degree.get(conflict.agent_a) || 0) + 1); }
+        }
       }
     }
+    const queue: AgentId[] = [], result: AgentId[] = [];
+    for (const agent of agents) if (in_degree.get(agent) === 0) queue.push(agent);
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      result.push(current);
+      const neighbors = graph.get(current) || new Set();
+      for (const neighbor of neighbors) { in_degree.set(neighbor, in_degree.get(neighbor)! - 1); if (in_degree.get(neighbor) === 0) queue.push(neighbor); }
+    }
+    return result.length === agents.length ? result : agents;
+  }
 
-    console.log(`[ConflictDetector] Pruned ${pruned} old conflict patterns`);
-    return pruned;
+  private applyTemporalDecay(pattern: ConflictPattern): number {
+    const age_ms = Date.now() - pattern.last_observed;
+    const age_days = age_ms / (1000 * 60 * 60 * 24);
+    const lambda = Math.log(2) / this.DECAY_HALF_LIFE_DAYS;
+    return pattern.probability * Math.exp(-lambda * age_days);
+  }
+
+  private calculateRiskScore(conflicts: ConflictPattern[]): number {
+    if (conflicts.length === 0) return 0.0;
+    let total_weight = 0, weighted_sum = 0;
+    for (const conflict of conflicts) {
+      const weight = conflict.conflict_type === 'resource' || conflict.conflict_type === 'ordering' ? 1.5 : 1.0;
+      weighted_sum += conflict.probability * weight;
+      total_weight += weight;
+    }
+    return Math.min(1.0, weighted_sum / total_weight);
+  }
+
+  private getConflictPattern(agent_a: AgentId, agent_b: AgentId): ConflictPattern | null {
+    return this.conflict_patterns.get(this.getPatternKey(agent_a, agent_b)) || null;
+  }
+
+  private getPatternKey(agent_a: AgentId, agent_b: AgentId): string {
+    const sorted = [agent_a, agent_b].sort();
+    return sorted[0] + ':' + sorted[1];
+  }
+
+  private initializeKnownToolConflicts(): void {
+    this.tool_matrix.tool_conflicts.set('edit_file', new Set(['write_file', 'delete_file']));
+    this.tool_matrix.tool_conflicts.set('write_file', new Set(['edit_file', 'delete_file']));
+    this.tool_matrix.tool_conflicts.set('npm_install', new Set(['npm_uninstall']));
+    this.tool_matrix.tool_conflicts.set('build', new Set(['run_tests']));
+  }
+
+  private initializeAgentToolMappings(): void {
+    this.tool_matrix.agent_tools.set('hollowed_eyes', new Set(['edit_file', 'write_file', 'read_file']));
+    this.tool_matrix.agent_tools.set('the_curator', new Set(['npm_install', 'npm_uninstall', 'edit_file']));
+    this.tool_matrix.agent_tools.set('loveless', new Set(['run_tests', 'read_file']));
+    this.tool_matrix.agent_tools.set('the_architect', new Set(['write_file', 'create_directory']));
+    this.tool_matrix.agent_tools.set('the_sentinel', new Set(['run_tests', 'build']));
+    this.tool_matrix.agent_tools.set('the_didact', new Set(['web_search', 'write_file']));
+  }
+
+  exportPatterns(): ConflictPattern[] { return Array.from(this.conflict_patterns.values()); }
+  importPatterns(patterns: ConflictPattern[]): void {
+    this.conflict_patterns.clear();
+    for (const pattern of patterns) this.conflict_patterns.set(this.getPatternKey(pattern.agent_a, pattern.agent_b), pattern);
+    this.tool_matrix.learned_conflicts = patterns;
   }
 }
 
-/**
- * Singleton instance
- */
 export const conflictDetector = new PredictiveConflictDetector();
