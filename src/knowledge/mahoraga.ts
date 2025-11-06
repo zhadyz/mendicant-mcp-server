@@ -690,7 +690,8 @@ export class AdaptivePlanner {
       agents_to_remove: originalPlan.agents
         .filter(spec => !refinedAgents.includes(spec.agent_id))
         .map(spec => spec.agent_id),
-      agents_to_reorder: conflictAnalysis.recommended_reordering || null
+      agents_to_reorder: [], // Would need to convert recommended_reordering (AgentId[]) to swap operations
+      dependency_changes: [] // Would need dependency analysis to populate
     };
 
     // Generate refined plan (simplified - would need agent specs in real impl)

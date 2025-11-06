@@ -23,6 +23,31 @@ import { detectPlanConflicts } from './knowledge/conflict_detector.js';
 import { memoryBridge } from './knowledge/memory_bridge.js';
 import { validateSafety, shouldBlockExecution } from './knowledge/safety_validator.js';
 import { validateConfidence, shouldAddFallbackAgents, suggestFallbackAgents, getConfidenceMessage } from './knowledge/confidence_validator.js';
+import type { ExecutionPattern } from './types.js';
+
+/**
+ * Convert PastExecution (from Mnemosyne) to ExecutionPattern (for temporal engine and analysis)
+ */
+function convertPastExecutionToExecutionPattern(past: PastExecution): ExecutionPattern {
+  return {
+    id: `past-${past.timestamp}`,
+    timestamp: past.timestamp,
+    objective: past.objective,
+    objective_type: 'unknown', // Not tracked in PastExecution
+    project_context: past.project_context,
+    agents_used: past.agents_used,
+    execution_order: past.agents_used, // Assume sequential order
+    agent_results: [], // Not tracked in PastExecution
+    success: past.success,
+    total_duration_ms: past.duration_ms,
+    total_tokens: 0, // Not tracked in PastExecution
+    conflicts: [], // Not tracked in PastExecution
+    gaps: [], // Not tracked in PastExecution
+    verification_passed: past.verification_passed,
+    failure_reason: undefined,
+    tags: past.tags || []
+  };
+}
 
 /**
  * Creates an orchestration plan for a given objective
@@ -133,6 +158,11 @@ async function generateCustomPlan(
   pastExecutions?: PastExecution[]
 ): Promise<OrchestrationPlan> {
 
+  // Convert PastExecution[] to ExecutionPattern[] for temporal engine and other systems
+  const executionPatterns: ExecutionPattern[] = pastExecutions
+    ? pastExecutions.map(convertPastExecutionToExecutionPattern)
+    : [];
+
   // SEMANTIC ANALYSIS - NEW: Use advanced multi-label semantic embedder
   const semanticEmbedding = await semanticEmbedder.analyzeObjective(objective);
   console.log(`[Planner] Semantic analysis: confidence=${(semanticEmbedding.confidence * 100).toFixed(0)}%, complexity=${(semanticEmbedding.complexity_score * 100).toFixed(0)}%`);
@@ -147,20 +177,20 @@ async function generateCustomPlan(
     : await selectAgentsFromRegistry(requiredCapabilities);
 
   // Consider recommendations from past executions - NEW: Apply temporal decay
-  if (pastExecutions && pastExecutions.length > 0) {
+  if (executionPatterns && executionPatterns.length > 0) {
     // Apply temporal decay to filter stale patterns
-    const temporalHealth = temporalEngine.calculateTemporalHealth(pastExecutions);
+    const temporalHealth = temporalEngine.calculateTemporalHealth(executionPatterns);
     console.log(`[Planner] Temporal health: ${(temporalHealth.health_score * 100).toFixed(0)}% (fresh: ${temporalHealth.fresh_patterns}, stale: ${temporalHealth.stale_patterns})`);
 
     // Filter out very stale patterns (relevance < 0.2)
-    const enrichedPatterns = temporalEngine.batchEnrich(pastExecutions);
+    const enrichedPatterns = temporalEngine.batchEnrich(executionPatterns);
     const freshPatterns = enrichedPatterns.filter(p => p.temporal_relevance >= 0.2);
 
-    if (freshPatterns.length < pastExecutions.length) {
-      console.log(`[Planner] Filtered ${pastExecutions.length - freshPatterns.length} stale patterns`);
+    if (freshPatterns.length < executionPatterns.length) {
+      console.log(`[Planner] Filtered ${executionPatterns.length - freshPatterns.length} stale patterns`);
     }
 
-    const recommended = recommendAgents(objective, freshPatterns);
+    const recommended = recommendAgents(objective, pastExecutions || []);
     if (recommended.length > 0) {
       // Merge with selected agents, preferring recommended ones
       agents = [...new Set([...recommended, ...agents])];
@@ -258,7 +288,7 @@ async function generateCustomPlan(
     agentSpecs.map(a => a.agent_id),
     semanticEmbedding,
     context,
-    pastExecutions || []
+    executionPatterns
   );
 
   console.log(`[Planner] Bayesian confidence: ${(bayesianConfidence.confidence * 100).toFixed(0)}% ± ${(bayesianConfidence.uncertainty * 100).toFixed(0)}%`);
@@ -270,7 +300,7 @@ async function generateCustomPlan(
   }
 
   // Check minimum confidence threshold
-  const min_confidence = constraints?.confidence_thresholds?.minimum || 0.3;
+  const min_confidence = constraints?.confidence_thresholds?.minimum_overall || 0.3;
   const max_uncertainty = 0.3; // Maximum acceptable uncertainty
 
   if (bayesianConfidence.confidence < min_confidence || bayesianConfidence.uncertainty > max_uncertainty) {
@@ -288,7 +318,7 @@ async function generateCustomPlan(
       alternativePlans,
       semanticEmbedding,
       context,
-      pastExecutions
+      executionPatterns
     );
 
     console.log(`[Planner] Pareto optimization: ${paretoResult.pareto_frontier.length} optimal solutions found`);
@@ -333,8 +363,8 @@ async function generateCustomPlan(
   reasoning += `Confidence: ${(bayesianConfidence.confidence * 100).toFixed(0)}% [${(bayesianConfidence.confidence_interval[0] * 100).toFixed(0)}%-${(bayesianConfidence.confidence_interval[1] * 100).toFixed(0)}%], uncertainty: ${(bayesianConfidence.uncertainty * 100).toFixed(0)}%. `;
 
   // Temporal decay
-  if (pastExecutions && pastExecutions.length > 0) {
-    const temporalHealth = temporalEngine.calculateTemporalHealth(pastExecutions);
+  if (executionPatterns && executionPatterns.length > 0) {
+    const temporalHealth = temporalEngine.calculateTemporalHealth(executionPatterns);
     reasoning += `Temporal health: ${(temporalHealth.health_score * 100).toFixed(0)}% (${temporalHealth.fresh_patterns} fresh patterns). `;
   }
 

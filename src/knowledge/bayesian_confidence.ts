@@ -351,9 +351,9 @@ export class BayesianConfidenceEngine {
       return { mean: 0.5, variance: 0.25 };
     }
     
-    const success_vals = history.map(p => p.success ? 1.0 : 0.0);
-    const mean = success_vals.reduce((a, b) => a + b, 0) / success_vals.length;
-    const variance = success_vals.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / success_vals.length;
+    const success_vals: number[] = history.map(p => p.success ? 1.0 : 0.0);
+    const mean: number = success_vals.reduce((a: number, b: number) => a + b, 0) / success_vals.length;
+    const variance: number = success_vals.reduce((sum: number, val: number) => sum + Math.pow(val - mean, 2), 0) / success_vals.length;
     
     return { mean, variance };
   }

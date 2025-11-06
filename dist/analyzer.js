@@ -180,40 +180,120 @@ function analyzeGitStatus(gitStatus) {
     return { issues, score_penalty: penalty };
 }
 /**
- * Analyzes recent errors
+ * Analyzes recent errors - FIXED to deeply parse error details
  */
 function analyzeErrors(errors) {
     const issues = [];
     let penalty = 0;
+    // CRITICAL FIX: Actually check if errors exist and have content
+    if (!errors || errors.length === 0) {
+        return { issues, score_penalty: 0 };
+    }
+    // Parse EACH error in detail
+    const errorDetails = errors.map(e => ({
+        type: e.type || 'unknown',
+        message: e.message || e.toString() || 'Unknown error',
+        severity: classifyErrorSeverity(e),
+        stack: e.stack || null
+    }));
     // Group errors by type
     const errorTypes = new Map();
-    for (const error of errors) {
-        const type = error.type || 'unknown';
-        errorTypes.set(type, (errorTypes.get(type) || 0) + 1);
+    for (const error of errorDetails) {
+        errorTypes.set(error.type, (errorTypes.get(error.type) || 0) + 1);
     }
-    // Security errors are critical
-    const securityErrors = errors.filter(e => e.type?.includes('security') ||
-        e.message?.toLowerCase().includes('vulnerability'));
+    // Security errors are CRITICAL
+    const securityErrors = errorDetails.filter(e => e.type?.toLowerCase().includes('security') ||
+        e.message.toLowerCase().includes('vulnerability') ||
+        e.message.toLowerCase().includes('cve') ||
+        e.message.toLowerCase().includes('exploit'));
     if (securityErrors.length > 0) {
         issues.push({
             type: 'security_errors',
             severity: 'critical',
-            description: `${securityErrors.length} security-related error(s) detected`,
-            suggested_fix: 'Run loveless for security audit, then fix vulnerabilities'
+            description: `${securityErrors.length} security-related error(s): ${securityErrors[0].message.slice(0, 80)}`,
+            suggested_fix: 'Run loveless for security audit, then fix vulnerabilities IMMEDIATELY'
         });
-        penalty = 35;
+        penalty = 40; // Increased from 35
     }
-    // Many errors indicate instability
+    // Critical errors (failures, crashes)
+    const criticalErrors = errorDetails.filter(e => e.severity === 'critical');
+    if (criticalErrors.length > 0) {
+        issues.push({
+            type: 'critical_errors',
+            severity: 'critical',
+            description: `${criticalErrors.length} critical error(s): ${criticalErrors[0].message.slice(0, 80)}`,
+            suggested_fix: 'Address critical errors before proceeding'
+        });
+        penalty += criticalErrors.length * 15;
+    }
+    // High severity errors
+    const highErrors = errorDetails.filter(e => e.severity === 'high');
+    if (highErrors.length > 0) {
+        issues.push({
+            type: 'high_severity_errors',
+            severity: 'high',
+            description: `${highErrors.length} high severity error(s): ${highErrors[0].message.slice(0, 80)}`,
+            suggested_fix: 'Fix high severity errors to improve stability'
+        });
+        penalty += highErrors.length * 10;
+    }
+    // Many errors indicate systemic instability
     if (errors.length > 10) {
         issues.push({
             type: 'many_errors',
             severity: 'high',
-            description: `${errors.length} recent errors indicating instability`,
+            description: `${errors.length} recent errors indicating systemic instability`,
             suggested_fix: 'Investigate error patterns and address root causes'
         });
-        penalty += 20;
+        penalty += 25; // Increased from 20
     }
-    return { issues, score_penalty: Math.min(penalty, 50) };
+    // Medium errors still matter
+    const mediumErrors = errorDetails.filter(e => e.severity === 'medium');
+    if (mediumErrors.length > 5) {
+        issues.push({
+            type: 'multiple_medium_errors',
+            severity: 'medium',
+            description: `${mediumErrors.length} medium severity errors detected`,
+            suggested_fix: 'Review and fix medium severity errors'
+        });
+        penalty += 10;
+    }
+    return { issues, score_penalty: Math.min(penalty, 75) }; // Increased cap from 50 to 75
+}
+/**
+ * Classifies error severity based on error details
+ */
+function classifyErrorSeverity(error) {
+    const message = (error.message || error.toString() || '').toLowerCase();
+    const type = (error.type || '').toLowerCase();
+    // CRITICAL: Security, crashes, data loss
+    if (message.includes('security') ||
+        message.includes('vulnerability') ||
+        message.includes('exploit') ||
+        message.includes('crash') ||
+        message.includes('fatal') ||
+        message.includes('data loss') ||
+        type.includes('security')) {
+        return 'critical';
+    }
+    // HIGH: Failures, cannot continue
+    if (message.includes('fail') ||
+        message.includes('cannot') ||
+        message.includes('error:') ||
+        message.includes('exception') ||
+        message.includes('assertion') ||
+        type.includes('error')) {
+        return 'high';
+    }
+    // MEDIUM: Warnings, deprecated
+    if (message.includes('warn') ||
+        message.includes('deprecated') ||
+        message.includes('should not') ||
+        type.includes('warning')) {
+        return 'medium';
+    }
+    // LOW: Everything else
+    return 'low';
 }
 /**
  * Generates recommendation for an issue

@@ -167,7 +167,7 @@ async function recordExecutionWithFeedbackLoop(
     const actual_success = successfulAgents >= results.length * 0.7; // 70% threshold
 
     // Calculate totals
-    const total_duration_ms = results.reduce((sum, r) => sum + r.duration_ms, 0);
+    const total_duration_ms = results.reduce((sum, r) => sum + (r.duration_ms || 0), 0);
     const total_tokens = results.reduce((sum, r) => sum + (r.tokens_used || 0), 0);
 
     // Extract errors
@@ -177,10 +177,10 @@ async function recordExecutionWithFeedbackLoop(
 
     // Map conflicts to feedback format
     const conflicts_feedback = conflicts.map(c => ({
-      agent_a: c.agent_a || 'unknown',
-      agent_b: c.agent_b || 'unknown',
-      conflict_type: c.type || 'unknown',
-      severity: c.severity || 'medium'
+      agent_a: c.agents[0] || 'unknown',
+      agent_b: c.agents[1] || 'unknown',
+      conflict_type: 'unknown' as const, // Must be one of: "unknown" | "resource" | "semantic" | "ordering"
+      severity: 0.5 // Default severity (0.0 to 1.0)
     }));
 
     // Build comprehensive feedback object
@@ -204,11 +204,10 @@ async function recordExecutionWithFeedbackLoop(
 
     // Log learning improvements
     console.log(`[Feedback Loop] Learning metrics:`);
-    console.log(`  - Calibration quality (Brier score): ${learningMetrics.calibration_quality.toFixed(4)} (lower is better)`);
+    console.log(`  - Calibration improvement: ${learningMetrics.calibration_improvement.toFixed(4)}`);
     console.log(`  - Semantic accuracy: ${(learningMetrics.semantic_accuracy * 100).toFixed(1)}%`);
-    console.log(`  - Agent prediction accuracy: ${(learningMetrics.agent_prediction_accuracy * 100).toFixed(1)}%`);
     console.log(`  - Conflict prediction accuracy: ${(learningMetrics.conflict_prediction_accuracy * 100).toFixed(1)}%`);
-    console.log(`  - Temporal decay properly applied: ${learningMetrics.temporal_knowledge_updated ? 'Yes' : 'No'}`);
+    console.log(`  - Temporal health improvement: ${learningMetrics.temporal_health_improvement.toFixed(4)}`);
 
     // Legacy agent registry feedback
     for (const result of results) {

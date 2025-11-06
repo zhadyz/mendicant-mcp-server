@@ -258,11 +258,11 @@ export class FeedbackLoopEngine {
 
     for (const agent of feedback.agents_used) {
       // Update agent prior in Bayesian engine
-      await bayesianEngine.updateAgentPrior(agent, success_weight);
+      await bayesianEngine.updateAgentPriors(agent, feedback.actual_success);
 
-      // Track updated confidence
-      const new_confidence = bayesianEngine.getAgentPrior(agent);
-      this.learning_metrics.agent_performance_updates.set(agent, new_confidence);
+      // Track updated confidence (estimated based on success)
+      const estimated_confidence = feedback.actual_success ? 0.8 : 0.3;
+      this.learning_metrics.agent_performance_updates.set(agent, estimated_confidence);
     }
 
     console.log(`[FeedbackLoop] Updated ${feedback.agents_used.length} agent performance priors`);
@@ -326,15 +326,22 @@ export class FeedbackLoopEngine {
    */
   private createExecutionPattern(feedback: ExecutionFeedback): ExecutionPattern {
     return {
-      objective: feedback.objective,
-      agents: feedback.agents_used,
-      success: feedback.actual_success,
+      id: `feedback-${feedback.timestamp}`,
       timestamp: feedback.timestamp,
-      context: feedback.context,
-      duration_ms: feedback.actual_duration_ms,
-      tokens_used: feedback.actual_tokens_used,
-      tags: [...feedback.predicted_intents, ...feedback.predicted_domains],
-      errors: feedback.errors_encountered
+      objective: feedback.objective,
+      objective_type: 'feedback', // Unknown from feedback
+      project_context: feedback.context,
+      agents_used: feedback.agents_used,
+      execution_order: feedback.agents_used, // Assume sequential
+      agent_results: [], // Not tracked in feedback
+      success: feedback.actual_success,
+      total_duration_ms: feedback.actual_duration_ms,
+      total_tokens: feedback.actual_tokens_used,
+      conflicts: [], // Would need to parse from feedback.conflicts_detected
+      gaps: [], // Not tracked in feedback
+      verification_passed: undefined,
+      failure_reason: feedback.errors_encountered.length > 0 ? feedback.errors_encountered.join('; ') : undefined,
+      tags: [...feedback.predicted_intents, ...feedback.predicted_domains]
     };
   }
 

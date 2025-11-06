@@ -13,6 +13,12 @@
  */
 import { classifyError as classifyErrorEnhanced } from './error_classifier.js';
 import { generateBootstrapPatterns } from './bootstrap.js';
+// NEW: Advanced intelligence systems for genuine adaptation
+import { semanticEmbedder } from './semantic_embedder.js';
+import { bayesianEngine } from './bayesian_confidence.js';
+import { temporalEngine } from './temporal_decay.js';
+import { conflictDetector } from './predictive_conflict_detector.js';
+import { paretoOptimizer } from './pareto_optimizer.js';
 /**
  * Mahoraga's memory - stores and retrieves execution patterns
  */
@@ -249,15 +255,23 @@ export class PredictiveSelector {
         return scores.sort((a, b) => b.predicted_success_rate - a.predicted_success_rate);
     }
     calculatePredictiveScore(agentId, similarPatterns) {
+        // NEW: Apply temporal decay to filter stale patterns
+        const currentTime = Date.now();
+        const temporalPatterns = similarPatterns
+            .map(m => ({
+            ...m,
+            temporal_relevance: temporalEngine.calculateDecayedScore(m.pattern, currentTime)
+        }))
+            .filter(m => m.temporal_relevance >= 0.1); // Filter out very stale patterns
         // Find patterns where this agent was used
-        const patternsWithAgent = similarPatterns.filter(m => m.pattern.agents_used.includes(agentId));
+        const patternsWithAgent = temporalPatterns.filter(m => m.pattern.agents_used.includes(agentId));
         if (patternsWithAgent.length === 0) {
-            // No data - return baseline
+            // No data - return baseline with Bayesian prior
             return {
                 agent_id: agentId,
-                predicted_success_rate: 0.5,
+                predicted_success_rate: 0.5, // Uninformative prior
                 confidence: 0.0,
-                reasoning: ['No historical data for this agent in similar contexts'],
+                reasoning: ['No historical data for this agent in similar contexts', 'Using uninformative Bayesian prior'],
                 historical_performance: {
                     similar_objectives: 0,
                     success_in_similar: 0,
@@ -265,30 +279,51 @@ export class PredictiveSelector {
                 }
             };
         }
-        // Calculate success rate in similar contexts
+        // NEW: Bayesian inference for success rate prediction
+        // Start with prior from global agent performance
+        const globalPrior = bayesianEngine['agent_priors'].get(agentId) || 0.5;
+        // Calculate likelihood from temporally-weighted patterns
         const successfulPatterns = patternsWithAgent.filter(m => m.pattern.success);
-        const successRate = successfulPatterns.length / patternsWithAgent.length;
-        // Weight by similarity score
-        const weightedSuccessRate = patternsWithAgent.reduce((sum, m) => {
-            const success = m.pattern.success ? 1 : 0;
-            return sum + (success * m.similarity_score);
-        }, 0) / patternsWithAgent.reduce((sum, m) => sum + m.similarity_score, 0);
+        // Weight by both similarity AND temporal relevance
+        let totalWeight = 0;
+        let weightedSuccesses = 0;
+        for (const match of patternsWithAgent) {
+            const weight = match.similarity_score * match.temporal_relevance;
+            totalWeight += weight;
+            if (match.pattern.success) {
+                weightedSuccesses += weight;
+            }
+        }
+        const likelihood = totalWeight > 0 ? weightedSuccesses / totalWeight : globalPrior;
+        // Bayesian updating: posterior = (likelihood * prior) / evidence
+        const evidence = likelihood * globalPrior + (1 - likelihood) * (1 - globalPrior);
+        const posterior = evidence > 0 ? (likelihood * globalPrior) / evidence : globalPrior;
+        // Weight posterior towards likelihood based on sample size (more data = trust likelihood more)
+        const sampleWeight = Math.min(patternsWithAgent.length / 20, 0.9); // Max 90% weight to likelihood
+        const weightedSuccessRate = posterior * (1 - sampleWeight) + likelihood * sampleWeight;
         // Calculate average tokens
         const avgTokens = patternsWithAgent.reduce((sum, m) => {
             const result = m.pattern.agent_results.find(r => r.agent_id === agentId);
             return sum + (result?.tokens_used || 0);
         }, 0) / patternsWithAgent.length;
-        // Confidence based on sample size
-        const confidence = Math.min(patternsWithAgent.length / 10, 1.0);
-        // Generate reasoning
+        // NEW: Confidence based on sample size AND temporal health
+        const sampleConfidence = Math.min(patternsWithAgent.length / 10, 1.0);
+        const avgTemporalRelevance = patternsWithAgent.reduce((sum, m) => sum + m.temporal_relevance, 0) / patternsWithAgent.length;
+        const confidence = sampleConfidence * avgTemporalRelevance;
+        // Generate reasoning with intelligence system insights
         const reasoning = [];
-        reasoning.push(`Used in ${patternsWithAgent.length} similar executions`);
-        reasoning.push(`Success rate in similar contexts: ${(successRate * 100).toFixed(0)}%`);
+        reasoning.push(`Bayesian inference from ${patternsWithAgent.length} temporally-relevant executions`);
+        reasoning.push(`Prior: ${(globalPrior * 100).toFixed(0)}%, Likelihood: ${(likelihood * 100).toFixed(0)}%, Posterior: ${(weightedSuccessRate * 100).toFixed(0)}%`);
+        reasoning.push(`Avg temporal relevance: ${(avgTemporalRelevance * 100).toFixed(0)}%`);
         if (weightedSuccessRate > 0.8) {
-            reasoning.push('Strong performer in similar scenarios');
+            reasoning.push('Strong Bayesian posterior - highly recommended');
         }
         else if (weightedSuccessRate < 0.5) {
-            reasoning.push('Historically struggled with similar objectives');
+            reasoning.push('Weak Bayesian posterior - consider alternatives');
+        }
+        // Warn about stale data
+        if (avgTemporalRelevance < 0.5) {
+            reasoning.push('WARNING: Patterns are temporally degraded - predictions may be outdated');
         }
         return {
             agent_id: agentId,
@@ -430,44 +465,134 @@ export class AdaptivePlanner {
      * Refine a failed plan based on learned patterns
      * NOW WITH ADAPTIVE CREATIVITY - adjusts strategy based on confidence
      */
-    refinePlan(originalPlan, failureContext, objective, projectContext) {
-        // Find successful patterns for similar objectives
-        const successfulPatterns = this.memory
-            .findSimilarPatterns(objective, projectContext, 10)
-            .filter(m => m.pattern.success);
-        // Calculate confidence FIRST to determine strategy
-        const confidence = this.calculateRefinementConfidence(successfulPatterns, failureContext);
-        // ADAPTIVE STRATEGY SELECTION based on confidence
-        let suggestedChanges;
-        let strategyUsed;
-        if (confidence < 0.3) {
-            // LOW CONFIDENCE → AGGRESSIVE EXPERIMENTAL REFINEMENT
-            suggestedChanges = this.generateAggressiveRefinement(originalPlan, failureContext, objective, projectContext);
-            strategyUsed = 'aggressive_experimental';
-        }
-        else if (confidence < 0.7) {
-            // MEDIUM CONFIDENCE → HYBRID PATTERN MIXING
-            suggestedChanges = this.hybridizePatterns(successfulPatterns, originalPlan, failureContext);
-            strategyUsed = 'hybrid_cross_pollination';
+    async refinePlan(originalPlan, failureContext, objective, projectContext) {
+        // NEW: Find temporally-relevant successful patterns
+        const currentTime = Date.now();
+        const allPatterns = this.memory.findSimilarPatterns(objective, projectContext, 20);
+        // Apply temporal decay
+        const temporalPatterns = allPatterns
+            .map(m => ({
+            ...m,
+            temporal_relevance: temporalEngine.calculateDecayedScore(m.pattern, currentTime)
+        }))
+            .filter(m => m.temporal_relevance >= 0.2 && m.pattern.success);
+        // Calculate base confidence
+        const baseConfidence = this.calculateRefinementConfidence(temporalPatterns, failureContext);
+        // NEW: Get semantic analysis for intelligent refinement
+        const semanticEmbedding = await semanticEmbedder.analyzeObjective(objective);
+        // PHASE 1: Analyze conflicts in original plan
+        const conflictAnalysis = await conflictDetector.analyzeConflicts(originalPlan.agents.map(a => a.agent_id), objective, semanticEmbedding, projectContext);
+        // PHASE 2: Generate alternative agent combinations
+        const alternatives = this.generateAlternativePlans(originalPlan, failureContext, temporalPatterns, conflictAnalysis);
+        // PHASE 3: Use Pareto optimizer to find best refinement
+        let refinedAgents;
+        let paretoUsed = false;
+        if (alternatives.length > 1) {
+            try {
+                const paretoResult = await paretoOptimizer.optimize(objective, alternatives, semanticEmbedding, projectContext, temporalPatterns.map(m => m.pattern));
+                refinedAgents = paretoResult.recommended_plan.agents;
+                paretoUsed = true;
+                console.log(`[Mahoraga] Pareto optimization found ${paretoResult.pareto_frontier.length} optimal plans`);
+            }
+            catch (err) {
+                console.error('[Mahoraga] Pareto optimization failed, using heuristic fallback:', err);
+                refinedAgents = alternatives[0]; // Best heuristic alternative
+            }
         }
         else {
-            // HIGH CONFIDENCE → CONSERVATIVE REFINEMENT
-            suggestedChanges = this.determinePlanChanges(originalPlan, failureContext, successfulPatterns);
-            strategyUsed = 'conservative_evidence_based';
+            refinedAgents = alternatives[0];
         }
-        // Generate refined plan
-        const refinedPlan = this.applyChanges(originalPlan, suggestedChanges);
-        // Generate reasoning with strategy context
-        const reasoning = `[Strategy: ${strategyUsed}, Confidence: ${(confidence * 100).toFixed(0)}%] ` +
-            this.generateRefinementReasoning(suggestedChanges, failureContext, successfulPatterns);
+        // PHASE 4: Apply conflict resolutions
+        if (conflictAnalysis.recommended_reordering) {
+            const reordered = conflictAnalysis.recommended_reordering;
+            refinedAgents = refinedAgents
+                .sort((a, b) => {
+                const aIdx = reordered.indexOf(a);
+                const bIdx = reordered.indexOf(b);
+                if (aIdx === -1 && bIdx === -1)
+                    return 0;
+                if (aIdx === -1)
+                    return 1;
+                if (bIdx === -1)
+                    return -1;
+                return aIdx - bIdx;
+            });
+        }
+        if (conflictAnalysis.agents_to_remove && conflictAnalysis.agents_to_remove.length > 0) {
+            refinedAgents = refinedAgents.filter(a => !conflictAnalysis.agents_to_remove.includes(a));
+        }
+        // PHASE 5: Calculate final confidence using Bayesian engine
+        const finalConfidence = bayesianEngine.calculateConfidence(refinedAgents, semanticEmbedding, projectContext, temporalPatterns.map(m => m.pattern));
+        // Build suggested changes
+        const suggestedChanges = {
+            agents_to_add: refinedAgents.filter(a => !originalPlan.agents.find(spec => spec.agent_id === a)),
+            agents_to_remove: originalPlan.agents
+                .filter(spec => !refinedAgents.includes(spec.agent_id))
+                .map(spec => spec.agent_id),
+            agents_to_reorder: [], // Would need to convert recommended_reordering (AgentId[]) to swap operations
+            dependency_changes: [] // Would need dependency analysis to populate
+        };
+        // Generate refined plan (simplified - would need agent specs in real impl)
+        const refinedPlan = {
+            ...originalPlan,
+            agents: refinedAgents.map(agentId => {
+                const existing = originalPlan.agents.find(s => s.agent_id === agentId);
+                return existing || { agent_id: agentId };
+            }).filter(Boolean)
+        };
+        // Generate comprehensive reasoning
+        const avgTemporalRelevance = temporalPatterns.length > 0
+            ? temporalPatterns.reduce((sum, m) => sum + m.temporal_relevance, 0) / temporalPatterns.length
+            : 0;
+        let reasoning = `[ADVANCED ADAPTIVE REFINEMENT] `;
+        reasoning += `Bayesian confidence: ${(finalConfidence.confidence * 100).toFixed(0)}% `;
+        reasoning += `[${(finalConfidence.confidence_interval[0] * 100).toFixed(0)}%-${(finalConfidence.confidence_interval[1] * 100).toFixed(0)}%]. `;
+        reasoning += `Temporal patterns: ${temporalPatterns.length} (avg relevance: ${(avgTemporalRelevance * 100).toFixed(0)}%). `;
+        if (paretoUsed) {
+            reasoning += `Pareto optimization applied (multi-objective: accuracy/cost/latency). `;
+        }
+        if (conflictAnalysis.predicted_conflicts.length > 0) {
+            reasoning += `Conflicts detected: ${conflictAnalysis.predicted_conflicts.length}, resolutions applied. `;
+        }
+        reasoning += `Strategy: ${finalConfidence.confidence > 0.7 ? 'conservative' : finalConfidence.confidence > 0.3 ? 'hybrid' : 'experimental'}`;
         return {
             original_plan: originalPlan,
             failure_analysis: failureContext,
             suggested_changes: suggestedChanges,
             refined_plan: refinedPlan,
-            confidence,
+            confidence: finalConfidence.confidence,
             reasoning
         };
+    }
+    /**
+     * Generate alternative agent combinations for Pareto optimization
+     */
+    generateAlternativePlans(originalPlan, failureContext, successPatterns, conflictAnalysis) {
+        const alternatives = [];
+        const originalAgents = originalPlan.agents.map(a => a.agent_id);
+        // Alternative 1: Remove failed agent
+        if (failureContext.failed_agent) {
+            alternatives.push(originalAgents.filter(a => a !== failureContext.failed_agent));
+        }
+        // Alternative 2: Use agents from most successful similar pattern
+        if (successPatterns.length > 0) {
+            const bestPattern = successPatterns[0];
+            alternatives.push(bestPattern.pattern.agents_used);
+        }
+        // Alternative 3: Remove low-priority agents
+        const highPriorityAgents = originalPlan.agents
+            .filter(a => a.priority === 'critical' || a.priority === 'high')
+            .map(a => a.agent_id);
+        if (highPriorityAgents.length > 0) {
+            alternatives.push(highPriorityAgents);
+        }
+        // Alternative 4: Apply conflict resolutions
+        if (conflictAnalysis.agents_to_remove && conflictAnalysis.agents_to_remove.length > 0) {
+            alternatives.push(originalAgents.filter(a => !conflictAnalysis.agents_to_remove.includes(a)));
+        }
+        // Always include original as baseline
+        alternatives.push(originalAgents);
+        return alternatives.filter(alt => alt.length > 0);
     }
     determinePlanChanges(plan, failure, successfulPatterns) {
         const changes = {
@@ -725,9 +850,9 @@ export class MahoragaEngine {
     /**
      * Refine a failed plan
      */
-    refinePlan(originalPlan, failureContext, objective, projectContext) {
+    async refinePlan(originalPlan, failureContext, objective, projectContext) {
         this.ensureBootstrapped();
-        return this.planner.refinePlan(originalPlan, failureContext, objective, projectContext);
+        return await this.planner.refinePlan(originalPlan, failureContext, objective, projectContext);
     }
     /**
      * Find similar successful patterns

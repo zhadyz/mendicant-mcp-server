@@ -19,6 +19,12 @@ export interface PastExecution {
     verification_passed: boolean;
     pattern_used?: string;
     timestamp: number;
+    tags?: string[];
+    project_context?: {
+        has_tests?: boolean;
+        is_production?: boolean;
+        [key: string]: any;
+    };
     metadata: {
         verification_passed: boolean;
         success_rate: number;

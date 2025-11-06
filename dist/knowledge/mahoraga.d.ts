@@ -86,7 +86,11 @@ export declare class AdaptivePlanner {
      * Refine a failed plan based on learned patterns
      * NOW WITH ADAPTIVE CREATIVITY - adjusts strategy based on confidence
      */
-    refinePlan(originalPlan: OrchestrationPlan, failureContext: FailureContext, objective: string, projectContext?: ProjectContext): AdaptiveRefinement;
+    refinePlan(originalPlan: OrchestrationPlan, failureContext: FailureContext, objective: string, projectContext?: ProjectContext): Promise<AdaptiveRefinement>;
+    /**
+     * Generate alternative agent combinations for Pareto optimization
+     */
+    private generateAlternativePlans;
     private determinePlanChanges;
     private findCommonAgents;
     private applyChanges;
@@ -133,7 +137,7 @@ export declare class MahoragaEngine {
     /**
      * Refine a failed plan
      */
-    refinePlan(originalPlan: OrchestrationPlan, failureContext: FailureContext, objective: string, projectContext?: ProjectContext): AdaptiveRefinement;
+    refinePlan(originalPlan: OrchestrationPlan, failureContext: FailureContext, objective: string, projectContext?: ProjectContext): Promise<AdaptiveRefinement>;
     /**
      * Find similar successful patterns
      */

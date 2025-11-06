@@ -490,7 +490,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'mendicant_refine_plan': {
                 const { original_plan, failure_context, objective, project_context } = args;
                 const { mahoraga } = await import('./knowledge/mahoraga.js');
-                const refinement = mahoraga.refinePlan(original_plan, failure_context, objective, project_context);
+                const refinement = await mahoraga.refinePlan(original_plan, failure_context, objective, project_context);
                 return {
                     content: [
                         {

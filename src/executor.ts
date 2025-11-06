@@ -257,13 +257,15 @@ export async function executePlan(
   // Initialize adaptive executor with the plan
   const executionPlan = {
     agents: plan.agents.map(a => a.agent_id),
-    execution_strategy: plan.execution_strategy,
-    phases: plan.phases?.map(p => p.phase_name),
+    execution_mode: plan.execution_strategy === 'sequential' ? 'sequential' as const :
+                     plan.execution_strategy === 'parallel' ? 'parallel' as const :
+                     'hybrid' as const,
     estimated_duration_ms: plan.agents.length * 30000, // Rough estimate: 30s per agent
-    estimated_tokens: plan.estimated_tokens
+    estimated_tokens: plan.estimated_tokens,
+    confidence: 0.7 // Default confidence
   };
 
-  await adaptiveExecutor.initialize(objective, executionPlan);
+  await adaptiveExecutor.startExecution(objective, executionPlan, undefined);
 
   const results: AgentResult[] = [];
   let agentsToExecute = plan.agents.map(a => a.agent_id);
@@ -277,8 +279,15 @@ export async function executePlan(
     const result = await executeAgent(agentId, objective, taskToolExecutor);
     results.push(result);
 
-    // Process result through adaptive executor
-    const executionState = await adaptiveExecutor.processAgentResult(result);
+    // Process result through adaptive executor (add timestamp for AdaptiveExecutor's AgentResult type)
+    const executionState = await adaptiveExecutor.processAgentResult({
+      ...result,
+      timestamp: Date.now(),
+      duration_ms: result.duration_ms || 0,
+      tokens_used: result.tokens_used || 0,
+      output: result.output,
+      error: result.success ? undefined : result.output
+    });
 
     // Log execution state
     console.log(`[Executor] State: ${executionState.status}`);
@@ -320,14 +329,16 @@ export async function executePlan(
   }
 
   // Get final execution state and log summary
-  const finalState = adaptiveExecutor.getExecutionState();
-  console.log(`\n[Executor] ====== EXECUTION SUMMARY ======`);
-  console.log(`[Executor] Status: ${finalState.status}`);
-  console.log(`[Executor] Completed: ${finalState.completed_agents.length} agents`);
-  console.log(`[Executor] Adaptations: ${finalState.adaptations.length}`);
+  const finalState = adaptiveExecutor.getState();
+  if (finalState) {
+    console.log(`\n[Executor] ====== EXECUTION SUMMARY ======`);
+    console.log(`[Executor] Status: ${finalState.status}`);
+    console.log(`[Executor] Completed: ${finalState.completed_agents.length} agents`);
+    console.log(`[Executor] Adaptations: ${finalState.adaptations.length}`);
 
-  if (finalState.adaptations.length > 0) {
-    console.log(`[Executor] Adaptation types: ${finalState.adaptations.map(a => a.type).join(', ')}`);
+    if (finalState.adaptations.length > 0) {
+      console.log(`[Executor] Adaptation types: ${finalState.adaptations.map((a: any) => a.type).join(', ')}`);
+    }
   }
 
   return results;

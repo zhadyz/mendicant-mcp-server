@@ -347,7 +347,7 @@ export class AgentCommunicationBus {
 
     // Filter by timestamp
     if (options?.since) {
-      history = history.filter(m => m.timestamp >= options.since);
+      history = history.filter(m => m.timestamp >= (options.since || 0));
     }
 
     // Limit results

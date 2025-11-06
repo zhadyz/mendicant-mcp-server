@@ -1,3 +1,4 @@
+import { adaptiveExecutor } from './knowledge/adaptive_executor.js';
 /**
  * EXECUTOR - The Bridge Between Planning and Reality
  *
@@ -8,7 +9,8 @@
  * - Map agent_ids to Task tool subagent_types
  * - Execute agents in sequence or parallel as planned
  * - Collect results and performance metrics
- * - Handle failures gracefully
+ * - Handle failures gracefully with adaptive recovery
+ * - Apply real-time plan optimization (Mahoraga-style)
  * - Return structured results for coordinator learning
  */
 /**
@@ -223,32 +225,85 @@ Provide wisdom and validation in your output.`
  * Returns results suitable for coordinator learning
  */
 export async function executePlan(objective, plan, taskToolExecutor) {
-    const results = [];
-    console.log(`[Executor] Beginning execution of plan: ${objective}`);
+    console.log(`[Executor] Beginning ADAPTIVE execution: ${objective}`);
     console.log(`[Executor] Strategy: ${plan.execution_strategy}`);
-    console.log(`[Executor] Phases: ${plan.phases?.length || 0}`);
-    // Execute phases in sequence if phased execution
-    if (plan.phases && plan.phases.length > 0) {
-        for (const phase of plan.phases) {
-            console.log(`\n[Executor] ====== ${phase.phase_name} ======`);
-            // Execute agents in phase (parallel if phase allows)
-            const phaseResults = await executePhase(phase.agents, objective, taskToolExecutor);
-            results.push(...phaseResults);
-            // Check for failures that should block next phase
-            const criticalFailures = phaseResults.filter(r => !r.success && isCriticalAgent(r.agent_id));
-            if (criticalFailures.length > 0) {
-                console.log(`[Executor] Critical failure in ${phase.phase_name}, stopping execution`);
-                break;
-            }
+    console.log(`[Executor] Initial agents: ${plan.agents.map(a => a.agent_id).join(', ')}`);
+    // Initialize adaptive executor with the plan
+    const executionPlan = {
+        agents: plan.agents.map(a => a.agent_id),
+        execution_mode: plan.execution_strategy === 'sequential' ? 'sequential' :
+            plan.execution_strategy === 'parallel' ? 'parallel' :
+                'hybrid',
+        estimated_duration_ms: plan.agents.length * 30000, // Rough estimate: 30s per agent
+        estimated_tokens: plan.estimated_tokens,
+        confidence: 0.7 // Default confidence
+    };
+    await adaptiveExecutor.startExecution(objective, executionPlan, undefined);
+    const results = [];
+    let agentsToExecute = plan.agents.map(a => a.agent_id);
+    // Execute agents with adaptive loop
+    while (agentsToExecute.length > 0) {
+        const agentId = agentsToExecute[0];
+        console.log(`\n[Executor] Executing: ${agentId} (${agentsToExecute.length} remaining)`);
+        // Execute the agent
+        const result = await executeAgent(agentId, objective, taskToolExecutor);
+        results.push(result);
+        // Process result through adaptive executor (add timestamp for AdaptiveExecutor's AgentResult type)
+        const executionState = await adaptiveExecutor.processAgentResult({
+            ...result,
+            timestamp: Date.now(),
+            duration_ms: result.duration_ms || 0,
+            tokens_used: result.tokens_used || 0,
+            output: result.output,
+            error: result.success ? undefined : result.output
+        });
+        // Log execution state
+        console.log(`[Executor] State: ${executionState.status}`);
+        if (executionState.adaptations.length > 0) {
+            const lastAdaptation = executionState.adaptations[executionState.adaptations.length - 1];
+            console.log(`[Executor] Adaptation: ${lastAdaptation.type} - ${lastAdaptation.reason}`);
+        }
+        // Handle different execution states
+        if (executionState.status === 'recovering') {
+            console.log(`[Executor] Recovery in progress for ${agentId}`);
+            // Recovery strategy is already applied by adaptive executor
+            // The plan in executionState.current_plan has been updated
+            agentsToExecute = executionState.pending_agents;
+        }
+        else if (executionState.status === 'adapting') {
+            console.log(`[Executor] Plan optimization in progress`);
+            // Plan has been optimized, update our execution queue
+            agentsToExecute = executionState.pending_agents;
+        }
+        else if (executionState.status === 'failed') {
+            console.error(`[Executor] Execution failed - no recovery possible`);
+            break;
+        }
+        else if (executionState.status === 'completed') {
+            console.log(`[Executor] All agents completed successfully`);
+            break;
+        }
+        else {
+            // Status is 'running' - continue normally
+            agentsToExecute.shift(); // Remove completed agent
+        }
+        // Safety check: prevent infinite loops
+        if (results.length > plan.agents.length * 2) {
+            console.error(`[Executor] Safety limit reached - possible infinite loop`);
+            break;
         }
     }
-    else {
-        // Execute all agents sequentially if no phases
-        const agentIds = plan.agents.map(a => a.agent_id);
-        const allResults = await executePhase(agentIds, objective, taskToolExecutor);
-        results.push(...allResults);
+    // Get final execution state and log summary
+    const finalState = adaptiveExecutor.getState();
+    if (finalState) {
+        console.log(`\n[Executor] ====== EXECUTION SUMMARY ======`);
+        console.log(`[Executor] Status: ${finalState.status}`);
+        console.log(`[Executor] Completed: ${finalState.completed_agents.length} agents`);
+        console.log(`[Executor] Adaptations: ${finalState.adaptations.length}`);
+        if (finalState.adaptations.length > 0) {
+            console.log(`[Executor] Adaptation types: ${finalState.adaptations.map((a) => a.type).join(', ')}`);
+        }
     }
-    console.log(`\n[Executor] Execution complete. ${results.length} agents executed.`);
     return results;
 }
 /**
