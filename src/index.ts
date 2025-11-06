@@ -26,7 +26,7 @@ import type { ProjectContext, Constraints, AgentResult, AgentFeedback } from './
 const server = new Server(
   {
     name: 'mendicant-mcp-server',
-    version: '0.1.0',
+    version: '0.1.1',
   },
   {
     capabilities: {
