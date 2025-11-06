@@ -35,10 +35,15 @@ export class AgentRegistry {
   private cacheLoadPromise: Promise<void> | null = null;
 
   constructor() {
+    console.error('[DEBUG] AgentRegistry constructor called');
+    console.error('[DEBUG] AGENT_CAPABILITIES keys:', Object.keys(AGENT_CAPABILITIES));
+    console.error('[DEBUG] AGENT_CAPABILITIES entries:', Object.keys(AGENT_CAPABILITIES).length);
     // Start with hardcoded defaults in memory
     for (const [id, spec] of Object.entries(AGENT_CAPABILITIES)) {
       this.memoryCache.set(id, spec);
+      console.error('[DEBUG] Added agent to memoryCache:', id);
     }
+    console.error('[DEBUG] memoryCache size after constructor:', this.memoryCache.size);
   }
 
   /**
@@ -46,15 +51,20 @@ export class AgentRegistry {
    * Brutally efficient: memory-first, lazy-load disk cache
    */
   async getAllAgents(): Promise<Record<AgentId, AgentCapability>> {
+    console.error('[DEBUG] getAllAgents called, memoryCache size:', this.memoryCache.size);
     await this.ensureCacheLoaded();
+    console.error('[DEBUG] After ensureCacheLoaded, memoryCache size:', this.memoryCache.size);
 
     const agents: Record<AgentId, AgentCapability> = {};
 
     // Merge hardcoded and learned agents
     for (const [id, spec] of this.memoryCache) {
+      console.error('[DEBUG] Processing memoryCache entry:', id);
       const learned = this.learnedAgents.get(id);
       agents[id] = this.mergeAgentData(spec, learned);
     }
+
+    console.error('[DEBUG] After memoryCache loop, agents keys:', Object.keys(agents));
 
     // Add purely learned agents (not in hardcoded set)
     for (const [id, learned] of this.learnedAgents) {
@@ -63,6 +73,7 @@ export class AgentRegistry {
       }
     }
 
+    console.error('[DEBUG] Final agents count:', Object.keys(agents).length);
     return agents;
   }
 
