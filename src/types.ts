@@ -147,3 +147,91 @@ export interface AgentDiscoveryContext {
   available_agents?: AgentId[];
   feedback?: AgentFeedback[];
 }
+
+// Mahoraga-level adaptive intelligence types
+
+/**
+ * Complete execution context - stores EVERYTHING about what happened
+ * This is Mahoraga's "memory" of phenomena
+ */
+export interface ExecutionPattern {
+  id: string;
+  timestamp: number;
+  objective: string;
+  objective_type: string; // "implement", "fix", "test", "deploy", etc.
+  project_context?: ProjectContext;
+  agents_used: AgentId[];
+  execution_order: AgentId[];
+  agent_results: AgentResult[];
+  success: boolean;
+  total_duration_ms: number;
+  total_tokens: number;
+  conflicts: Conflict[];
+  gaps: Gap[];
+  verification_passed?: boolean;
+  failure_reason?: string;
+  tags: string[]; // ["nextjs", "react", "security", "backend", etc.]
+}
+
+/**
+ * Rich failure context - WHY did it fail?
+ * Mahoraga analyzes the attack's nature, not just that it got hit
+ */
+export interface FailureContext {
+  pattern_id: string;
+  objective: string;
+  failed_agent: AgentId;
+  error_message?: string;
+  error_type?: string; // "timeout", "compilation_error", "test_failure", etc.
+  preceding_agents: AgentId[];
+  project_context?: ProjectContext;
+  attempted_dependencies: string[];
+  suggested_fix?: string;
+  learned_avoidance?: string; // What to avoid in future
+}
+
+/**
+ * Pattern matching score - how similar is current objective to past execution?
+ */
+export interface PatternMatch {
+  pattern: ExecutionPattern;
+  similarity_score: number; // 0.0 - 1.0
+  matching_factors: string[]; // ["objective_type", "project_type", "tags"]
+  success_rate: number;
+  avg_duration_ms: number;
+  recommended_agents: AgentId[];
+}
+
+/**
+ * Predictive agent scoring - will this agent succeed?
+ * Based on learned patterns, not just global success rate
+ */
+export interface PredictiveScore {
+  agent_id: AgentId;
+  predicted_success_rate: number; // 0.0 - 1.0
+  confidence: number; // How confident is this prediction?
+  reasoning: string[];
+  historical_performance: {
+    similar_objectives: number;
+    success_in_similar: number;
+    avg_tokens_in_similar: number;
+  };
+}
+
+/**
+ * Adaptive refinement - how to improve a failed plan
+ * Mahoraga's adaptation in action
+ */
+export interface AdaptiveRefinement {
+  original_plan: OrchestrationPlan;
+  failure_analysis: FailureContext;
+  suggested_changes: {
+    agents_to_add: AgentId[];
+    agents_to_remove: AgentId[];
+    agents_to_reorder: { from: number; to: number }[];
+    dependency_changes: { agent: AgentId; add_deps: AgentId[]; remove_deps: AgentId[] }[];
+  };
+  refined_plan: OrchestrationPlan;
+  confidence: number;
+  reasoning: string;
+}

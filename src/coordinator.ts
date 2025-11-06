@@ -1,5 +1,6 @@
-import type { AgentResult, CoordinationResult, Conflict, Gap } from './types.js';
+import type { AgentResult, CoordinationResult, Conflict, Gap, ProjectContext, OrchestrationPlan } from './types.js';
 import { agentRegistry } from './knowledge/agent_registry.js';
+import { mahoraga } from './knowledge/mahoraga.js';
 
 /**
  * Coordinates and synthesizes results from multiple agents
@@ -10,10 +11,13 @@ import { agentRegistry } from './knowledge/agent_registry.js';
  * - Identifying gaps in coverage
  * - Making recommendations for next steps
  * - Recording feedback for passive learning
+ * - Recording execution patterns for Mahoraga adaptive learning
  */
 export async function coordinateResults(
   objective: string,
-  agentResults: AgentResult[]
+  agentResults: AgentResult[],
+  plan?: OrchestrationPlan,
+  projectContext?: ProjectContext
 ): Promise<CoordinationResult> {
   
   // Check if any agents failed
@@ -40,6 +44,11 @@ export async function coordinateResults(
   // Record feedback for passive learning (async, non-blocking)
   recordAgentFeedback(agentResults);
 
+  // Record execution pattern for Mahoraga adaptive learning (async, non-blocking)
+  if (plan) {
+    recordExecutionPattern(objective, plan, agentResults, conflicts, gaps, projectContext);
+  }
+
   return {
     synthesis,
     conflicts,
@@ -63,6 +72,25 @@ function recordAgentFeedback(results: AgentResult[]): void {
     }).catch(err => {
       console.error(`Failed to record feedback for ${result.agent_id}:`, err);
     });
+  }
+}
+
+/**
+ * Records complete execution pattern for Mahoraga adaptive learning
+ * This captures the full context of what happened for future pattern matching
+ */
+function recordExecutionPattern(
+  objective: string,
+  plan: OrchestrationPlan,
+  results: AgentResult[],
+  conflicts: Conflict[],
+  gaps: Gap[],
+  projectContext?: ProjectContext
+): void {
+  try {
+    mahoraga.recordExecution(objective, plan, results, conflicts, gaps, projectContext);
+  } catch (err) {
+    console.error('Failed to record execution pattern for Mahoraga:', err);
   }
 }
 

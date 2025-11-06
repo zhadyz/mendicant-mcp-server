@@ -3,6 +3,7 @@ import { selectAgentsFromRegistry, estimateTokensFromRegistry, getAgentSpec } fr
 import { matchPattern } from './knowledge/patterns.js';
 import type { PastExecution } from './integration/mnemosyne.js';
 import { findSimilarExecutions, shouldReusePattern, recommendAgents } from './integration/mnemosyne.js';
+import { mahoraga } from './knowledge/mahoraga.js';
 
 /**
  * Creates an orchestration plan for a given objective
@@ -72,6 +73,14 @@ async function generateCustomPlan(
     }
   }
 
+  // Use Mahoraga predictive intelligence to rank agents by predicted success
+  const predictiveScores = mahoraga.predictAgents(agents, objective, context);
+
+  // Sort agents by predicted success rate (highest first)
+  agents = predictiveScores
+    .sort((a, b) => b.predicted_success_rate - a.predicted_success_rate)
+    .map(score => score.agent_id);
+
   // Apply constraints
   if (constraints?.max_agents && agents.length > constraints.max_agents) {
     agents = agents.slice(0, constraints.max_agents);
@@ -93,13 +102,25 @@ async function generateCustomPlan(
   // Estimate tokens using registry
   const estimated_tokens = await estimateTokensFromRegistry(agents);
 
+  // Build reasoning with Mahoraga insights
+  let reasoning = `Custom plan generated for objective. Selected agents based on required capabilities: ${requiredCapabilities.join(', ')}.`;
+
+  if (predictiveScores.length > 0) {
+    const topAgent = predictiveScores[0];
+    reasoning += ` Mahoraga predictive intelligence ranked agents by success probability. Top agent: ${topAgent.agent_id} (${(topAgent.predicted_success_rate * 100).toFixed(0)}% predicted success, confidence: ${(topAgent.confidence * 100).toFixed(0)}%).`;
+
+    if (topAgent.historical_performance.similar_objectives > 0) {
+      reasoning += ` Based on ${topAgent.historical_performance.similar_objectives} similar past executions.`;
+    }
+  }
+
   return {
     agents: agentSpecs,
     execution_strategy,
     phases,
     success_criteria: deriveSuccessCriteria(objective),
     estimated_tokens,
-    reasoning: `Custom plan generated for objective. Selected agents based on required capabilities: ${requiredCapabilities.join(', ')}`
+    reasoning
   };
 }
 

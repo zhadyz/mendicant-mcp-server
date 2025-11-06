@@ -99,7 +99,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'mendicant_coordinate',
-    description: 'Synthesize and coordinate results from multiple spawned agents. Call this after agents complete to get unified output, conflict resolution, and recommendations.',
+    description: 'Synthesize and coordinate results from multiple spawned agents. Call this after agents complete to get unified output, conflict resolution, and recommendations. Optionally pass plan and project_context for Mahoraga adaptive learning.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -113,29 +113,37 @@ const TOOLS: Tool[] = [
           items: {
             type: 'object',
             properties: {
-              agent_id: { 
+              agent_id: {
                 type: 'string',
                 description: 'ID of the agent (e.g., "hollowed_eyes")'
               },
-              output: { 
+              output: {
                 type: 'string',
                 description: 'Agent\'s output/response'
               },
-              success: { 
+              success: {
                 type: 'boolean',
                 description: 'Whether agent succeeded'
               },
-              duration_ms: { 
+              duration_ms: {
                 type: 'number',
                 description: 'How long agent took in milliseconds'
               },
-              tokens_used: { 
+              tokens_used: {
                 type: 'number',
                 description: 'Tokens used by agent'
               }
             },
             required: ['agent_id', 'output', 'success']
           }
+        },
+        plan: {
+          type: 'object',
+          description: 'Optional orchestration plan from mendicant_plan for Mahoraga learning'
+        },
+        project_context: {
+          type: 'object',
+          description: 'Optional project context for Mahoraga learning'
         }
       },
       required: ['objective', 'agent_results']
@@ -238,6 +246,108 @@ const TOOLS: Tool[] = [
         }
       }
     }
+  },
+  {
+    name: 'mendicant_predict_agents',
+    description: 'Use Mahoraga adaptive intelligence to predict agent success rates for an objective. Returns predictive scores with confidence levels based on similar past executions. Use this before spawning agents to make informed decisions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of agent IDs to score'
+        },
+        objective: {
+          type: 'string',
+          description: 'The objective to predict for'
+        },
+        context: {
+          type: 'object',
+          description: 'Optional project context for better predictions'
+        }
+      },
+      required: ['agent_ids', 'objective']
+    }
+  },
+  {
+    name: 'mendicant_analyze_failure',
+    description: 'Use Mahoraga failure analysis to understand WHY an agent failed. Returns rich failure context with learned avoidance rules and suggested fixes based on similar past failures.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        objective: {
+          type: 'string',
+          description: 'The objective that was being attempted'
+        },
+        failed_agent_id: {
+          type: 'string',
+          description: 'ID of the agent that failed'
+        },
+        error: {
+          type: 'string',
+          description: 'Error message from the failed agent'
+        },
+        preceding_agents: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of agent IDs that ran before the failure'
+        },
+        context: {
+          type: 'object',
+          description: 'Optional project context'
+        }
+      },
+      required: ['objective', 'failed_agent_id', 'error', 'preceding_agents']
+    }
+  },
+  {
+    name: 'mendicant_refine_plan',
+    description: 'Use Mahoraga adaptive refinement to improve a failed orchestration plan. Returns suggested changes and a refined plan based on analysis of similar successful patterns.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        original_plan: {
+          type: 'object',
+          description: 'The orchestration plan that failed'
+        },
+        failure_context: {
+          type: 'object',
+          description: 'Failure context from mendicant_analyze_failure'
+        },
+        objective: {
+          type: 'string',
+          description: 'The original objective'
+        },
+        project_context: {
+          type: 'object',
+          description: 'Optional project context'
+        }
+      },
+      required: ['original_plan', 'failure_context', 'objective']
+    }
+  },
+  {
+    name: 'mendicant_find_patterns',
+    description: 'Use Mahoraga pattern recognition to find similar successful executions. Returns pattern matches with similarity scores and recommended agents based on past successes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        objective: {
+          type: 'string',
+          description: 'The objective to find patterns for'
+        },
+        context: {
+          type: 'object',
+          description: 'Optional project context for better matching'
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of patterns to return (default: 10)'
+        }
+      },
+      required: ['objective']
+    }
   }
 ];
 
@@ -277,12 +387,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       }
 
       case 'mendicant_coordinate': {
-        const { objective, agent_results } = args as {
+        const { objective, agent_results, plan, project_context } = args as {
           objective: string;
           agent_results: AgentResult[];
+          plan?: any;
+          project_context?: ProjectContext;
         };
 
-        const coordination = await coordinateResults(objective, agent_results);
+        const coordination = await coordinateResults(objective, agent_results, plan, project_context);
 
         return {
           content: [
@@ -360,6 +472,104 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
             {
               type: 'text',
               text: JSON.stringify(agents, null, 2)
+            }
+          ]
+        };
+      }
+
+      case 'mendicant_predict_agents': {
+        const { agent_ids, objective, context } = args as unknown as {
+          agent_ids: string[];
+          objective: string;
+          context?: ProjectContext;
+        };
+
+        const { mahoraga } = await import('./knowledge/mahoraga.js');
+        const predictions = mahoraga.predictAgents(agent_ids, objective, context);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(predictions, null, 2)
+            }
+          ]
+        };
+      }
+
+      case 'mendicant_analyze_failure': {
+        const { objective, failed_agent_id, error, preceding_agents, context } = args as unknown as {
+          objective: string;
+          failed_agent_id: string;
+          error: string;
+          preceding_agents: string[];
+          context?: ProjectContext;
+        };
+
+        const { mahoraga } = await import('./knowledge/mahoraga.js');
+        const analysis = mahoraga.analyzeFailure(
+          objective,
+          failed_agent_id,
+          error,
+          preceding_agents,
+          context
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(analysis, null, 2)
+            }
+          ]
+        };
+      }
+
+      case 'mendicant_refine_plan': {
+        const { original_plan, failure_context, objective, project_context } = args as unknown as {
+          original_plan: any;
+          failure_context: any;
+          objective: string;
+          project_context?: ProjectContext;
+        };
+
+        const { mahoraga } = await import('./knowledge/mahoraga.js');
+        const refinement = mahoraga.refinePlan(
+          original_plan,
+          failure_context,
+          objective,
+          project_context
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(refinement, null, 2)
+            }
+          ]
+        };
+      }
+
+      case 'mendicant_find_patterns': {
+        const { objective, context, limit } = args as unknown as {
+          objective: string;
+          context?: ProjectContext;
+          limit?: number;
+        };
+
+        const { mahoraga } = await import('./knowledge/mahoraga.js');
+        const patterns = mahoraga.findSimilarSuccessfulPatterns(
+          objective,
+          context,
+          limit || 10
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(patterns, null, 2)
             }
           ]
         };
