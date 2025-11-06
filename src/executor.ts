@@ -1,4 +1,6 @@
 import type { OrchestrationPlan, AgentResult, ProjectContext } from './types.js';
+import { adaptiveExecutor } from './knowledge/adaptive_executor.js';
+import { mahoraga } from './knowledge/mahoraga.js';
 
 /**
  * EXECUTOR - The Bridge Between Planning and Reality
@@ -10,7 +12,8 @@ import type { OrchestrationPlan, AgentResult, ProjectContext } from './types.js'
  * - Map agent_ids to Task tool subagent_types
  * - Execute agents in sequence or parallel as planned
  * - Collect results and performance metrics
- * - Handle failures gracefully
+ * - Handle failures gracefully with adaptive recovery
+ * - Apply real-time plan optimization (Mahoraga-style)
  * - Return structured results for coordinator learning
  */
 
@@ -246,36 +249,87 @@ export async function executePlan(
   plan: OrchestrationPlan,
   taskToolExecutor: (description: string, prompt: string, subagentType: string, model?: string) => Promise<string>
 ): Promise<AgentResult[]> {
-  const results: AgentResult[] = [];
 
-  console.log(`[Executor] Beginning execution of plan: ${objective}`);
+  console.log(`[Executor] Beginning ADAPTIVE execution: ${objective}`);
   console.log(`[Executor] Strategy: ${plan.execution_strategy}`);
-  console.log(`[Executor] Phases: ${plan.phases?.length || 0}`);
+  console.log(`[Executor] Initial agents: ${plan.agents.map(a => a.agent_id).join(', ')}`);
 
-  // Execute phases in sequence if phased execution
-  if (plan.phases && plan.phases.length > 0) {
-    for (const phase of plan.phases) {
-      console.log(`\n[Executor] ====== ${phase.phase_name} ======`);
+  // Initialize adaptive executor with the plan
+  const executionPlan = {
+    agents: plan.agents.map(a => a.agent_id),
+    execution_strategy: plan.execution_strategy,
+    phases: plan.phases?.map(p => p.phase_name),
+    estimated_duration_ms: plan.agents.length * 30000, // Rough estimate: 30s per agent
+    estimated_tokens: plan.estimated_tokens
+  };
 
-      // Execute agents in phase (parallel if phase allows)
-      const phaseResults = await executePhase(phase.agents, objective, taskToolExecutor);
-      results.push(...phaseResults);
+  await adaptiveExecutor.initialize(objective, executionPlan);
 
-      // Check for failures that should block next phase
-      const criticalFailures = phaseResults.filter(r => !r.success && isCriticalAgent(r.agent_id));
-      if (criticalFailures.length > 0) {
-        console.log(`[Executor] Critical failure in ${phase.phase_name}, stopping execution`);
-        break;
-      }
+  const results: AgentResult[] = [];
+  let agentsToExecute = plan.agents.map(a => a.agent_id);
+
+  // Execute agents with adaptive loop
+  while (agentsToExecute.length > 0) {
+    const agentId = agentsToExecute[0];
+    console.log(`\n[Executor] Executing: ${agentId} (${agentsToExecute.length} remaining)`);
+
+    // Execute the agent
+    const result = await executeAgent(agentId, objective, taskToolExecutor);
+    results.push(result);
+
+    // Process result through adaptive executor
+    const executionState = await adaptiveExecutor.processAgentResult(result);
+
+    // Log execution state
+    console.log(`[Executor] State: ${executionState.status}`);
+    if (executionState.adaptations.length > 0) {
+      const lastAdaptation = executionState.adaptations[executionState.adaptations.length - 1];
+      console.log(`[Executor] Adaptation: ${lastAdaptation.type} - ${lastAdaptation.reason}`);
     }
-  } else {
-    // Execute all agents sequentially if no phases
-    const agentIds = plan.agents.map(a => a.agent_id);
-    const allResults = await executePhase(agentIds, objective, taskToolExecutor);
-    results.push(...allResults);
+
+    // Handle different execution states
+    if (executionState.status === 'recovering') {
+      console.log(`[Executor] Recovery in progress for ${agentId}`);
+      // Recovery strategy is already applied by adaptive executor
+      // The plan in executionState.current_plan has been updated
+      agentsToExecute = executionState.pending_agents;
+
+    } else if (executionState.status === 'adapting') {
+      console.log(`[Executor] Plan optimization in progress`);
+      // Plan has been optimized, update our execution queue
+      agentsToExecute = executionState.pending_agents;
+
+    } else if (executionState.status === 'failed') {
+      console.error(`[Executor] Execution failed - no recovery possible`);
+      break;
+
+    } else if (executionState.status === 'completed') {
+      console.log(`[Executor] All agents completed successfully`);
+      break;
+
+    } else {
+      // Status is 'running' - continue normally
+      agentsToExecute.shift(); // Remove completed agent
+    }
+
+    // Safety check: prevent infinite loops
+    if (results.length > plan.agents.length * 2) {
+      console.error(`[Executor] Safety limit reached - possible infinite loop`);
+      break;
+    }
   }
 
-  console.log(`\n[Executor] Execution complete. ${results.length} agents executed.`);
+  // Get final execution state and log summary
+  const finalState = adaptiveExecutor.getExecutionState();
+  console.log(`\n[Executor] ====== EXECUTION SUMMARY ======`);
+  console.log(`[Executor] Status: ${finalState.status}`);
+  console.log(`[Executor] Completed: ${finalState.completed_agents.length} agents`);
+  console.log(`[Executor] Adaptations: ${finalState.adaptations.length}`);
+
+  if (finalState.adaptations.length > 0) {
+    console.log(`[Executor] Adaptation types: ${finalState.adaptations.map(a => a.type).join(', ')}`);
+  }
+
   return results;
 }
 

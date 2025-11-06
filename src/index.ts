@@ -567,7 +567,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         };
 
         const { mahoraga } = await import('./knowledge/mahoraga.js');
-        const refinement = mahoraga.refinePlan(
+        const refinement = await mahoraga.refinePlan(
           original_plan,
           failure_context,
           objective,

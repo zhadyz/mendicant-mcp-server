@@ -4,6 +4,8 @@ import { mahoraga } from './knowledge/mahoraga.js';
 import { detectExecutionConflicts } from './knowledge/conflict_detector.js';
 import { memoryBridge } from './knowledge/memory_bridge.js';
 import { createMnemosyneEntities, createMnemosyneRelations } from './integration/mnemosyne_mcp.js';
+import { feedbackLoop } from './knowledge/feedback_loop.js';
+import { semanticEmbedder } from './knowledge/semantic_embedder.js';
 
 /**
  * Coordinates and synthesizes results from multiple agents
@@ -44,12 +46,13 @@ export async function coordinateResults(
   // Determine if verification is needed
   const verification_needed = shouldVerify(agentResults);
 
-  // Record feedback for passive learning (async, non-blocking)
-  recordAgentFeedback(agentResults);
-
-  // Record execution pattern for Mahoraga adaptive learning (async, non-blocking)
+  // NEW: Comprehensive closed-loop learning via feedback loop system
+  // This updates ALL intelligence systems based on execution outcomes
   if (plan) {
-    recordExecutionPattern(objective, plan, agentResults, conflicts, gaps, projectContext);
+    recordExecutionWithFeedbackLoop(objective, plan, agentResults, conflicts, gaps, projectContext);
+  } else {
+    // Fallback to legacy agent feedback recording
+    recordAgentFeedback(agentResults);
   }
 
   return {
@@ -122,6 +125,107 @@ async function recordExecutionPattern(
     }
   } catch (err) {
     console.error('Failed to record execution pattern:', err);
+  }
+}
+
+/**
+ * NEW: Comprehensive closed-loop learning system
+ * Combines legacy Mahoraga/Mnemosyne recording with advanced feedback loop
+ * that updates ALL intelligence systems
+ */
+async function recordExecutionWithFeedbackLoop(
+  objective: string,
+  plan: OrchestrationPlan,
+  results: AgentResult[],
+  conflicts: Conflict[],
+  gaps: Gap[],
+  projectContext?: ProjectContext
+): Promise<void> {
+  try {
+    // PHASE 1: Legacy learning systems (Mahoraga + Mnemosyne)
+    await recordExecutionPattern(objective, plan, results, conflicts, gaps, projectContext);
+
+    // PHASE 2: Advanced feedback loop - Updates ALL intelligence systems
+    console.log(`[Feedback Loop] Processing execution feedback for closed-loop learning`);
+
+    // Get semantic analysis from the planning phase
+    const semanticEmbedding = await semanticEmbedder.analyzeObjective(objective);
+
+    // Extract predicted intents and domains
+    const predicted_intents = Array.from(semanticEmbedding.intent_scores.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([intent, _]) => intent);
+
+    const predicted_domains = Array.from(semanticEmbedding.domain_scores.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([domain, _]) => domain);
+
+    // Calculate overall success
+    const successfulAgents = results.filter(r => r.success).length;
+    const actual_success = successfulAgents >= results.length * 0.7; // 70% threshold
+
+    // Calculate totals
+    const total_duration_ms = results.reduce((sum, r) => sum + r.duration_ms, 0);
+    const total_tokens = results.reduce((sum, r) => sum + (r.tokens_used || 0), 0);
+
+    // Extract errors
+    const errors_encountered = results
+      .filter(r => !r.success)
+      .map(r => `${r.agent_id}: ${r.output}`);
+
+    // Map conflicts to feedback format
+    const conflicts_feedback = conflicts.map(c => ({
+      agent_a: c.agent_a || 'unknown',
+      agent_b: c.agent_b || 'unknown',
+      conflict_type: c.type || 'unknown',
+      severity: c.severity || 'medium'
+    }));
+
+    // Build comprehensive feedback object
+    const feedback = {
+      objective,
+      agents_used: plan.agents.map(a => a.agent_id),
+      predicted_confidence: semanticEmbedding.confidence,
+      predicted_intents,
+      predicted_domains,
+      actual_success,
+      actual_duration_ms: total_duration_ms,
+      actual_tokens_used: total_tokens,
+      errors_encountered,
+      conflicts_detected: conflicts_feedback,
+      user_satisfaction: undefined, // Could be added in future with user feedback
+      timestamp: Date.now()
+    };
+
+    // Process through comprehensive feedback loop
+    const learningMetrics = await feedbackLoop.processFeedback(feedback);
+
+    // Log learning improvements
+    console.log(`[Feedback Loop] Learning metrics:`);
+    console.log(`  - Calibration quality (Brier score): ${learningMetrics.calibration_quality.toFixed(4)} (lower is better)`);
+    console.log(`  - Semantic accuracy: ${(learningMetrics.semantic_accuracy * 100).toFixed(1)}%`);
+    console.log(`  - Agent prediction accuracy: ${(learningMetrics.agent_prediction_accuracy * 100).toFixed(1)}%`);
+    console.log(`  - Conflict prediction accuracy: ${(learningMetrics.conflict_prediction_accuracy * 100).toFixed(1)}%`);
+    console.log(`  - Temporal decay properly applied: ${learningMetrics.temporal_knowledge_updated ? 'Yes' : 'No'}`);
+
+    // Legacy agent registry feedback
+    for (const result of results) {
+      agentRegistry.recordFeedback({
+        agent_id: result.agent_id,
+        success: result.success,
+        tokens_used: result.tokens_used,
+        duration_ms: result.duration_ms
+      }).catch(err => {
+        console.error(`Failed to record legacy feedback for ${result.agent_id}:`, err);
+      });
+    }
+
+  } catch (err) {
+    console.error('[Feedback Loop] Failed to process comprehensive feedback:', err);
+    // Fallback to legacy recording
+    await recordExecutionPattern(objective, plan, results, conflicts, gaps, projectContext);
   }
 }
 

@@ -5,6 +5,17 @@ import type { PastExecution } from './integration/mnemosyne.js';
 import { findSimilarExecutions, shouldReusePattern, recommendAgents } from './integration/mnemosyne.js';
 import { mahoraga } from './knowledge/mahoraga.js';
 import { detectVagueRequest, shouldInvokeLibrarian } from './knowledge/vague_detector.js';
+// NEW: Advanced intelligence systems
+import { semanticEmbedder } from './knowledge/semantic_embedder.js';
+import { bayesianEngine } from './knowledge/bayesian_confidence.js';
+import { temporalEngine } from './knowledge/temporal_decay.js';
+import { paretoOptimizer } from './knowledge/pareto_optimizer.js';
+import { conflictDetector } from './knowledge/predictive_conflict_detector.js';
+import { feedbackLoop } from './knowledge/feedback_loop.js';
+import { adaptiveExecutor } from './knowledge/adaptive_executor.js';
+import { commBus } from './knowledge/agent_communication_bus.js';
+
+// Legacy systems (gradually being replaced)
 import { analyzeObjectiveSemantic, getCapabilitiesFromAnalysis } from './knowledge/semantic_selector.js';
 import { checkMandatoryAgents, addMandatoryAgents } from './knowledge/mandatory_enforcer.js';
 import { enforceConstraints, validatePlan } from './knowledge/constraint_enforcer.js';
@@ -122,7 +133,11 @@ async function generateCustomPlan(
   pastExecutions?: PastExecution[]
 ): Promise<OrchestrationPlan> {
 
-  // SEMANTIC ANALYSIS - Analyze objective using intelligent semantic selection
+  // SEMANTIC ANALYSIS - NEW: Use advanced multi-label semantic embedder
+  const semanticEmbedding = await semanticEmbedder.analyzeObjective(objective);
+  console.log(`[Planner] Semantic analysis: confidence=${(semanticEmbedding.confidence * 100).toFixed(0)}%, complexity=${(semanticEmbedding.complexity_score * 100).toFixed(0)}%`);
+
+  // Fallback to legacy semantic selector for capability extraction
   const semanticAnalysis = analyzeObjectiveSemantic(objective);
   const requiredCapabilities = getCapabilitiesFromAnalysis(semanticAnalysis);
 
@@ -131,9 +146,21 @@ async function generateCustomPlan(
     ? semanticAnalysis.recommended_agents
     : await selectAgentsFromRegistry(requiredCapabilities);
 
-  // Consider recommendations from past executions
+  // Consider recommendations from past executions - NEW: Apply temporal decay
   if (pastExecutions && pastExecutions.length > 0) {
-    const recommended = recommendAgents(objective, pastExecutions);
+    // Apply temporal decay to filter stale patterns
+    const temporalHealth = temporalEngine.calculateTemporalHealth(pastExecutions);
+    console.log(`[Planner] Temporal health: ${(temporalHealth.health_score * 100).toFixed(0)}% (fresh: ${temporalHealth.fresh_patterns}, stale: ${temporalHealth.stale_patterns})`);
+
+    // Filter out very stale patterns (relevance < 0.2)
+    const enrichedPatterns = temporalEngine.batchEnrich(pastExecutions);
+    const freshPatterns = enrichedPatterns.filter(p => p.temporal_relevance >= 0.2);
+
+    if (freshPatterns.length < pastExecutions.length) {
+      console.log(`[Planner] Filtered ${pastExecutions.length - freshPatterns.length} stale patterns`);
+    }
+
+    const recommended = recommendAgents(objective, freshPatterns);
     if (recommended.length > 0) {
       // Merge with selected agents, preferring recommended ones
       agents = [...new Set([...recommended, ...agents])];
@@ -170,7 +197,31 @@ async function generateCustomPlan(
   // Estimate tokens using registry
   let estimated_tokens = await estimateTokensFromRegistry(agentSpecs.map(a => a.agent_id));
 
-  // CONFLICT DETECTION - Check for plan conflicts before execution
+  // CONFLICT DETECTION - NEW: Use predictive conflict detector with learned patterns
+  const predictiveConflictAnalysis = await conflictDetector.analyzeConflicts(
+    agentSpecs.map(a => a.agent_id),
+    objective,
+    semanticEmbedding,
+    context
+  );
+
+  console.log(`[Planner] Conflict analysis: ${predictiveConflictAnalysis.predicted_conflicts.length} conflicts, conflict-free prob: ${(predictiveConflictAnalysis.conflict_free_probability * 100).toFixed(0)}%`);
+
+  // Apply recommended conflict resolutions
+  if (predictiveConflictAnalysis.recommended_reordering) {
+    console.log(`[Planner] Applying recommended agent reordering to prevent conflicts`);
+    const reorderedIds = predictiveConflictAnalysis.recommended_reordering;
+    agentSpecs = reorderedIds
+      .map(id => agentSpecs.find(s => s.agent_id === id))
+      .filter((s): s is AgentSpec => s !== undefined);
+  }
+
+  if (predictiveConflictAnalysis.agents_to_remove && predictiveConflictAnalysis.agents_to_remove.length > 0) {
+    console.log(`[Planner] Removing conflicting agents: ${predictiveConflictAnalysis.agents_to_remove.join(', ')}`);
+    agentSpecs = agentSpecs.filter(s => !predictiveConflictAnalysis.agents_to_remove!.includes(s.agent_id));
+  }
+
+  // Fallback to legacy conflict detector for additional checks
   const conflictAnalysis = detectPlanConflicts(agentSpecs);
   if (!conflictAnalysis.safe_to_execute) {
     // Add conflict warnings to reasoning
@@ -202,7 +253,56 @@ async function generateCustomPlan(
     console.warn(`[PLAN VALIDATION] Warnings: ${validation.warnings.join('; ')}`);
   }
 
-  // CONFIDENCE VALIDATION - Validate overall confidence before execution
+  // CONFIDENCE VALIDATION - NEW: Use Bayesian confidence engine with proper probabilistic inference
+  const bayesianConfidence = bayesianEngine.calculateConfidence(
+    agentSpecs.map(a => a.agent_id),
+    semanticEmbedding,
+    context,
+    pastExecutions || []
+  );
+
+  console.log(`[Planner] Bayesian confidence: ${(bayesianConfidence.confidence * 100).toFixed(0)}% ± ${(bayesianConfidence.uncertainty * 100).toFixed(0)}%`);
+  console.log(`[Planner] Confidence interval: [${(bayesianConfidence.confidence_interval[0] * 100).toFixed(0)}%, ${(bayesianConfidence.confidence_interval[1] * 100).toFixed(0)}%]`);
+  console.log(`[Planner] Calibration score: ${bayesianConfidence.calibration_score.toFixed(3)} (lower is better)`);
+
+  if (bayesianConfidence.warnings.length > 0) {
+    console.warn(`[Planner] Confidence warnings: ${bayesianConfidence.warnings.join('; ')}`);
+  }
+
+  // Check minimum confidence threshold
+  const min_confidence = constraints?.confidence_thresholds?.minimum || 0.3;
+  const max_uncertainty = 0.3; // Maximum acceptable uncertainty
+
+  if (bayesianConfidence.confidence < min_confidence || bayesianConfidence.uncertainty > max_uncertainty) {
+    console.warn(`[Planner] Confidence too low or uncertainty too high - applying Pareto optimization`);
+
+    // Use Pareto optimizer to find better plan
+    // Generate alternative plans with different agent combinations
+    const alternativePlans: AgentId[][] = [
+      agentSpecs.map(a => a.agent_id), // Current plan
+      ...generateAlternativePlans(agentSpecs, 3) // 3 alternatives
+    ];
+
+    const paretoResult = await paretoOptimizer.optimize(
+      objective,
+      alternativePlans,
+      semanticEmbedding,
+      context,
+      pastExecutions
+    );
+
+    console.log(`[Planner] Pareto optimization: ${paretoResult.pareto_frontier.length} optimal solutions found`);
+    console.log(`[Planner] Recommended: ${paretoResult.recommended_plan.agents.length} agents, accuracy: ${(paretoResult.recommended_plan.scores.accuracy * 100).toFixed(0)}%`);
+
+    // Use recommended plan
+    agents = paretoResult.recommended_plan.agents;
+    agentSpecs = await Promise.all(
+      agents.map(agentId => createAgentSpec(agentId, objective, context))
+    );
+    estimated_tokens = paretoResult.recommended_plan.raw_metrics.estimated_tokens;
+  }
+
+  // Fallback to legacy confidence validator for additional checks
   const mahoragaTopConfidence = predictiveScores.length > 0 ? predictiveScores[0].confidence : undefined;
   const confidenceAnalysis = validateConfidence(
     {
@@ -219,50 +319,38 @@ async function generateCustomPlan(
     constraints?.confidence_thresholds
   );
 
-  // Check if confidence is too low
-  if (!confidenceAnalysis.should_execute) {
-    // Low confidence - suggest fallback agents
-    const fallbackAgents = suggestFallbackAgents(confidenceAnalysis.overall_confidence, {
-      agents: agentSpecs,
-      execution_strategy,
-      success_criteria: deriveSuccessCriteria(objective),
-      estimated_tokens,
-      reasoning: ''
-    });
+  // Build reasoning with ALL intelligence systems
+  let reasoning = `Custom plan generated with advanced intelligence systems. `;
 
-    if (fallbackAgents.length > 0) {
-      console.warn(`[CONFIDENCE VALIDATION] Low confidence (${(confidenceAnalysis.overall_confidence * 100).toFixed(0)}%) - Adding fallback agents: ${fallbackAgents.join(', ')}`);
+  // Semantic embedding analysis
+  reasoning += `Semantic: ${Array.from(semanticEmbedding.intent_scores.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([intent, score]) => `${intent}(${(score * 100).toFixed(0)}%)`)
+    .join(', ')}. `;
 
-      // Add fallback agents to plan
-      for (const fallbackId of fallbackAgents) {
-        const fallbackSpec = await createAgentSpec(fallbackId, objective, context);
-        agentSpecs.unshift(fallbackSpec); // Add at beginning
-      }
+  // Bayesian confidence
+  reasoning += `Confidence: ${(bayesianConfidence.confidence * 100).toFixed(0)}% [${(bayesianConfidence.confidence_interval[0] * 100).toFixed(0)}%-${(bayesianConfidence.confidence_interval[1] * 100).toFixed(0)}%], uncertainty: ${(bayesianConfidence.uncertainty * 100).toFixed(0)}%. `;
 
-      // Recalculate estimated tokens
-      estimated_tokens = await estimateTokensFromRegistry(agentSpecs.map(a => a.agent_id));
-    } else {
-      // No fallback agents available - throw error with recommendations
-      throw new Error(
-        `CONFIDENCE TOO LOW: Plan confidence is ${(confidenceAnalysis.overall_confidence * 100).toFixed(0)}%, below minimum threshold.\n\n` +
-        `Confidence Level: ${confidenceAnalysis.confidence_level}\n` +
-        `Warnings:\n${confidenceAnalysis.warnings.map(w => `  - ${w}`).join('\n')}\n\n` +
-        `Recommendations:\n${confidenceAnalysis.recommendations.map(r => `  - ${r}`).join('\n')}`
-      );
-    }
+  // Temporal decay
+  if (pastExecutions && pastExecutions.length > 0) {
+    const temporalHealth = temporalEngine.calculateTemporalHealth(pastExecutions);
+    reasoning += `Temporal health: ${(temporalHealth.health_score * 100).toFixed(0)}% (${temporalHealth.fresh_patterns} fresh patterns). `;
   }
 
-  // Build reasoning with Mahoraga insights and semantic analysis
-  let reasoning = `Custom plan generated for objective. Semantic analysis: Intent=${semanticAnalysis.intent}, Domain=${semanticAnalysis.domain}, TaskType=${semanticAnalysis.task_type}, Confidence=${(semanticAnalysis.confidence * 100).toFixed(0)}%. ${semanticAnalysis.reasoning}. ${getConfidenceMessage(confidenceAnalysis)}`;
+  // Predictive conflicts
+  if (predictiveConflictAnalysis.predicted_conflicts.length > 0) {
+    reasoning += `Conflicts: ${predictiveConflictAnalysis.predicted_conflicts.length} predicted (${(predictiveConflictAnalysis.conflict_free_probability * 100).toFixed(0)}% conflict-free). `;
+  }
 
+  // Mahoraga predictions
   if (predictiveScores.length > 0) {
     const topAgent = predictiveScores[0];
-    reasoning += ` Mahoraga predictive intelligence ranked agents by success probability. Top agent: ${topAgent.agent_id} (${(topAgent.predicted_success_rate * 100).toFixed(0)}% predicted success, confidence: ${(topAgent.confidence * 100).toFixed(0)}%).`;
-
-    if (topAgent.historical_performance.similar_objectives > 0) {
-      reasoning += ` Based on ${topAgent.historical_performance.similar_objectives} similar past executions.`;
-    }
+    reasoning += `Top agent: ${topAgent.agent_id} (${(topAgent.predicted_success_rate * 100).toFixed(0)}% predicted success). `;
   }
+
+  // Legacy compatibility
+  reasoning += `${semanticAnalysis.reasoning}. ${getConfidenceMessage(confidenceAnalysis)}`;
 
   if (mandatoryChecks.length > 0) {
     reasoning += ` Mandatory agents enforced: ${mandatoryChecks.map(c => c.agent_id).join(', ')}.`;
@@ -563,7 +651,7 @@ function buildPhases(agents: AgentSpec[]): any[] {
  */
 function deriveSuccessCriteria(objective: string): string {
   const lower = objective.toLowerCase();
-  
+
   if (lower.includes('test')) {
     return 'All tests pass, no regressions introduced';
   }
@@ -582,6 +670,49 @@ function deriveSuccessCriteria(objective: string): string {
   if (lower.includes('scaffold') || lower.includes('setup')) {
     return 'Project scaffolded, builds successfully, documentation complete';
   }
-  
+
   return 'Objective completed successfully with verification';
+}
+
+/**
+ * Generates alternative agent plans for Pareto optimization
+ * Creates variations by removing/substituting agents
+ */
+function generateAlternativePlans(baseSpecs: AgentSpec[], count: number): AgentId[][] {
+  const alternatives: AgentId[][] = [];
+  const baseAgents = baseSpecs.map(s => s.agent_id);
+
+  // Alternative 1: Remove lowest priority agent
+  if (baseSpecs.length > 1) {
+    const withoutLowest = baseSpecs
+      .filter(s => s.priority !== 'low')
+      .map(s => s.agent_id);
+    if (withoutLowest.length > 0) {
+      alternatives.push(withoutLowest);
+    }
+  }
+
+  // Alternative 2: Keep only critical and high priority
+  const highPriorityOnly = baseSpecs
+    .filter(s => s.priority === 'critical' || s.priority === 'high')
+    .map(s => s.agent_id);
+  if (highPriorityOnly.length > 0 && highPriorityOnly.length < baseAgents.length) {
+    alternatives.push(highPriorityOnly);
+  }
+
+  // Alternative 3: Remove duplicates by agent type
+  const uniqueTypes = new Set<string>();
+  const noDuplicates: AgentId[] = [];
+  for (const agent of baseAgents) {
+    const type = agent.split('_')[0]; // e.g., "hollowed" from "hollowed_eyes"
+    if (!uniqueTypes.has(type)) {
+      uniqueTypes.add(type);
+      noDuplicates.push(agent);
+    }
+  }
+  if (noDuplicates.length > 0 && noDuplicates.length < baseAgents.length) {
+    alternatives.push(noDuplicates);
+  }
+
+  return alternatives.slice(0, count);
 }
