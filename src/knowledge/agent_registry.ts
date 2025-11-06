@@ -17,7 +17,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { AgentId, AgentCapability, LearnedAgent, AgentFeedback } from '../types.js';
-import { AGENT_CAPABILITIES } from './agent_specs.js';
+import { AGENT_CAPABILITIES } from './agent_capabilities.js';
 
 const CACHE_DIR = join(homedir(), '.mendicant');
 const CACHE_FILE = join(CACHE_DIR, 'learned_agents.json');
