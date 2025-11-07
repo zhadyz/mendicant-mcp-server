@@ -1,18 +1,20 @@
 /**
  * Dashboard Auto-Launcher
  *
- * Automatically spawns the Next.js dashboard when MCP server starts.
- * Manages dashboard lifecycle (start/stop) and health monitoring.
+ * Serves the static dashboard build when MCP server starts.
+ * Manages dashboard HTTP server lifecycle.
  */
-import { spawn } from 'child_process';
-import { join } from 'path';
-import { existsSync } from 'fs';
+import { createServer } from 'http';
+import { join, extname } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 /**
- * Dashboard process manager
+ * Dashboard HTTP server manager
  */
 export class DashboardLauncher {
     config;
-    dashboardProcess = null;
+    httpServer = null;
     isRunning = false;
     startupPromise = null;
     constructor(config) {
@@ -42,134 +44,104 @@ export class DashboardLauncher {
      * Internal start implementation
      */
     async _startInternal() {
-        console.log('[DashboardLauncher] Starting dashboard...');
+        console.log('[DashboardLauncher] Starting dashboard HTTP server...');
         // Validate dashboard path
         if (!existsSync(this.config.dashboardPath)) {
             throw new Error(`Dashboard path does not exist: ${this.config.dashboardPath}`);
         }
-        const packageJsonPath = join(this.config.dashboardPath, 'package.json');
-        if (!existsSync(packageJsonPath)) {
-            throw new Error(`Dashboard package.json not found at: ${packageJsonPath}`);
-        }
-        // Prepare environment
-        const env = {
-            ...process.env,
-            PORT: String(this.config.port),
-            NODE_ENV: process.env.NODE_ENV || 'development',
-            ...this.config.env
-        };
-        // Spawn dashboard process
-        const command = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-        const args = ['run', 'dev'];
-        this.dashboardProcess = spawn(command, args, {
-            cwd: this.config.dashboardPath,
-            env,
-            stdio: ['ignore', 'pipe', 'pipe'],
-            detached: false
-        });
-        // Handle stdout
-        if (this.dashboardProcess.stdout) {
-            this.dashboardProcess.stdout.on('data', (data) => {
-                const output = data.toString().trim();
-                if (output) {
-                    console.log(`[Dashboard] ${output}`);
+        // Create HTTP server to serve static files
+        this.httpServer = createServer((req, res) => {
+            try {
+                // Parse URL and remove query string
+                const url = new URL(req.url || '/', `http://localhost:${this.config.port}`);
+                let pathname = url.pathname;
+                // Default to index.html for root
+                if (pathname === '/') {
+                    pathname = '/index.html';
                 }
-            });
-        }
-        // Handle stderr
-        if (this.dashboardProcess.stderr) {
-            this.dashboardProcess.stderr.on('data', (data) => {
-                const output = data.toString().trim();
-                if (output) {
-                    console.error(`[Dashboard Error] ${output}`);
+                // Map routes to .html files for Next.js static export
+                if (!pathname.includes('.') && !pathname.endsWith('.html')) {
+                    pathname = `${pathname}.html`;
                 }
-            });
-        }
-        // Handle process exit
-        this.dashboardProcess.on('exit', (code, signal) => {
-            console.log(`[DashboardLauncher] Dashboard exited with code ${code}, signal ${signal}`);
-            this.isRunning = false;
-            this.dashboardProcess = null;
-        });
-        // Handle process errors
-        this.dashboardProcess.on('error', (error) => {
-            console.error('[DashboardLauncher] Dashboard process error:', error);
-            this.isRunning = false;
-            this.dashboardProcess = null;
-        });
-        this.isRunning = true;
-        // Wait for dashboard to be ready (check for Next.js ready message or timeout)
-        await this.waitForReady();
-        console.log(`[DashboardLauncher] Dashboard started successfully on port ${this.config.port}`);
-    }
-    /**
-     * Wait for dashboard to be ready
-     */
-    async waitForReady(timeoutMs = 30000) {
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                console.warn('[DashboardLauncher] Dashboard startup timeout, but continuing anyway');
-                resolve();
-            }, timeoutMs);
-            // Check for Next.js ready indicators in stdout
-            const checkReady = (data) => {
-                const output = data.toString();
-                if (output.includes('Ready') || output.includes('started server') || output.includes('Local:')) {
-                    clearTimeout(timeout);
-                    if (this.dashboardProcess?.stdout) {
-                        this.dashboardProcess.stdout.removeListener('data', checkReady);
+                // Build file path
+                const filePath = join(this.config.dashboardPath, pathname);
+                // Check if file exists
+                if (!existsSync(filePath)) {
+                    // Try 404.html
+                    const notFoundPath = join(this.config.dashboardPath, '404.html');
+                    if (existsSync(notFoundPath)) {
+                        res.writeHead(404, { 'Content-Type': 'text/html' });
+                        res.end(readFileSync(notFoundPath));
                     }
-                    resolve();
+                    else {
+                        res.writeHead(404, { 'Content-Type': 'text/plain' });
+                        res.end('Not Found');
+                    }
+                    return;
                 }
-            };
-            if (this.dashboardProcess?.stdout) {
-                this.dashboardProcess.stdout.on('data', checkReady);
+                // Determine content type
+                const ext = extname(filePath);
+                const contentTypeMap = {
+                    '.html': 'text/html',
+                    '.js': 'application/javascript',
+                    '.css': 'text/css',
+                    '.json': 'application/json',
+                    '.png': 'image/png',
+                    '.jpg': 'image/jpeg',
+                    '.jpeg': 'image/jpeg',
+                    '.gif': 'image/gif',
+                    '.svg': 'image/svg+xml',
+                    '.ico': 'image/x-icon',
+                    '.woff': 'font/woff',
+                    '.woff2': 'font/woff2',
+                    '.ttf': 'font/ttf',
+                    '.txt': 'text/plain'
+                };
+                const contentType = contentTypeMap[ext] || 'application/octet-stream';
+                // Read and serve file
+                const content = readFileSync(filePath);
+                res.writeHead(200, { 'Content-Type': contentType });
+                res.end(content);
             }
-            else {
-                // If no stdout, just wait a bit
-                setTimeout(() => {
-                    clearTimeout(timeout);
-                    resolve();
-                }, 5000);
+            catch (error) {
+                console.error('[Dashboard] Error serving file:', error);
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Internal Server Error');
             }
+        });
+        // Start listening
+        await new Promise((resolve, reject) => {
+            this.httpServer.listen(this.config.port, () => {
+                this.isRunning = true;
+                console.log(`[DashboardLauncher] Dashboard HTTP server started on http://localhost:${this.config.port}`);
+                resolve();
+            });
+            this.httpServer.on('error', (error) => {
+                console.error('[DashboardLauncher] HTTP server error:', error);
+                reject(error);
+            });
         });
     }
     /**
      * Stop the dashboard
      */
     async stop() {
-        if (!this.isRunning || !this.dashboardProcess) {
+        if (!this.isRunning || !this.httpServer) {
             console.log('[DashboardLauncher] Dashboard not running');
             return;
         }
-        console.log('[DashboardLauncher] Stopping dashboard...');
+        console.log('[DashboardLauncher] Stopping dashboard HTTP server...');
         return new Promise((resolve) => {
-            if (!this.dashboardProcess) {
+            if (!this.httpServer) {
                 resolve();
                 return;
             }
-            // Set timeout for forceful kill
-            const timeout = setTimeout(() => {
-                if (this.dashboardProcess && !this.dashboardProcess.killed) {
-                    console.log('[DashboardLauncher] Force killing dashboard');
-                    this.dashboardProcess.kill('SIGKILL');
-                }
-                resolve();
-            }, 5000);
-            this.dashboardProcess.once('exit', () => {
-                clearTimeout(timeout);
+            this.httpServer.close(() => {
                 this.isRunning = false;
-                this.dashboardProcess = null;
-                console.log('[DashboardLauncher] Dashboard stopped');
+                this.httpServer = null;
+                console.log('[DashboardLauncher] Dashboard HTTP server stopped');
                 resolve();
             });
-            // Try graceful shutdown
-            if (process.platform === 'win32') {
-                this.dashboardProcess.kill('SIGTERM');
-            }
-            else {
-                this.dashboardProcess.kill('SIGTERM');
-            }
         });
     }
     /**
@@ -178,8 +150,8 @@ export class DashboardLauncher {
     getStatus() {
         return {
             running: this.isRunning,
-            pid: this.dashboardProcess?.pid,
-            port: this.config.port
+            port: this.config.port,
+            url: `http://localhost:${this.config.port}`
         };
     }
     /**
@@ -194,13 +166,13 @@ export class DashboardLauncher {
  * Create and configure dashboard launcher
  */
 export function createDashboardLauncher(config) {
+    // Dashboard is bundled in the npm package at ../dashboard (relative to dist/)
+    // When running from dist/index.js, the dashboard is at ../dashboard
+    const dashboardPath = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'dashboard');
     const defaultConfig = {
-        dashboardPath: join(process.cwd(), '..', 'dashboard'),
+        dashboardPath,
         autoStart: process.env.MENDICANT_AUTO_LAUNCH_DASHBOARD !== 'false',
-        port: parseInt(process.env.DASHBOARD_PORT || '3000', 10),
-        env: {
-            NEXT_PUBLIC_BRIDGE_URL: `http://127.0.0.1:${process.env.DASHBOARD_BRIDGE_PORT || '3001'}`
-        }
+        port: parseInt(process.env.DASHBOARD_PORT || '3000', 10)
     };
     return new DashboardLauncher({ ...defaultConfig, ...config });
 }

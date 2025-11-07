@@ -1,8 +1,8 @@
 /**
  * Dashboard Auto-Launcher
  *
- * Automatically spawns the Next.js dashboard when MCP server starts.
- * Manages dashboard lifecycle (start/stop) and health monitoring.
+ * Serves the static dashboard build when MCP server starts.
+ * Manages dashboard HTTP server lifecycle.
  */
 export interface DashboardLauncherConfig {
     dashboardPath: string;
@@ -11,11 +11,11 @@ export interface DashboardLauncherConfig {
     env?: Record<string, string>;
 }
 /**
- * Dashboard process manager
+ * Dashboard HTTP server manager
  */
 export declare class DashboardLauncher {
     private config;
-    private dashboardProcess;
+    private httpServer;
     private isRunning;
     private startupPromise;
     constructor(config: DashboardLauncherConfig);
@@ -28,10 +28,6 @@ export declare class DashboardLauncher {
      */
     private _startInternal;
     /**
-     * Wait for dashboard to be ready
-     */
-    private waitForReady;
-    /**
      * Stop the dashboard
      */
     stop(): Promise<void>;
@@ -40,8 +36,8 @@ export declare class DashboardLauncher {
      */
     getStatus(): {
         running: boolean;
-        pid: number | undefined;
         port: number;
+        url: string;
     };
     /**
      * Restart the dashboard
