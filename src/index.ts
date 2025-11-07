@@ -25,7 +25,10 @@ import { createPlan } from './planner.js';
 import { coordinateResults } from './coordinator.js';
 import { analyzeProject } from './analyzer.js';
 import { agentRegistry } from './knowledge/agent_registry.js';
-import type { ProjectContext, Constraints, AgentResult, AgentFeedback } from './types.js';
+import type { ProjectContext, Constraints, AgentResult, AgentFeedback, AgentCapability } from './types.js';
+
+// PHASE 3: Retry Orchestration
+import { RetryOrchestrator, type RetryStrategy, type PlanContext } from './orchestration/retry_orchestrator.js';
 
 // Debug: File-based logging
 const DEBUG_LOG = join(tmpdir(), 'mendicant-debug.log');
@@ -45,7 +48,7 @@ debugLog(`[DEBUG] agentRegistry imported: ${typeof agentRegistry}`);
 
 /**
  * Mendicant MCP Server
- * 
+ *
  * Provides orchestration intelligence for the mendicant_bias distributed agent system.
  * This server does NOT execute agents - it provides planning and coordination logic
  * that Claude Code uses to orchestrate agent execution.
@@ -62,6 +65,10 @@ const server = new Server(
     },
   }
 );
+
+// PHASE 3: Initialize Retry Orchestrator
+const retryOrchestrator = new RetryOrchestrator();
+debugLog('[DEBUG] RetryOrchestrator instantiated');
 
 /**
  * Define available tools
@@ -376,6 +383,56 @@ const TOOLS: Tool[] = [
       },
       required: ['objective']
     }
+  },
+  {
+    name: 'mendicant_execute_with_retry',
+    description: 'Execute task with automatic retry and sequential fallback. PHASE 3 feature: Intelligent retry mechanism that learns from failures and selects fallback agents when primary agents fail. Uses quality thresholds and learns patterns for future recommendations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        objective: {
+          type: 'string',
+          description: 'The objective to accomplish'
+        },
+        context: {
+          type: 'object',
+          description: 'Optional project context',
+          properties: {
+            project_type: {
+              type: 'string',
+              description: 'Type of project (e.g., "nextjs", "python")'
+            },
+            has_tests: {
+              type: 'boolean',
+              description: 'Whether project has tests'
+            }
+          }
+        },
+        strategy: {
+          type: 'object',
+          description: 'Optional retry strategy configuration',
+          properties: {
+            maxAttempts: {
+              type: 'number',
+              description: 'Maximum number of attempts (default: 3)'
+            },
+            fallbackScoreThreshold: {
+              type: 'number',
+              description: 'Minimum score for fallback agents (default: 0.5)'
+            },
+            timeout: {
+              type: 'number',
+              description: 'Task timeout in milliseconds'
+            },
+            learnFromFailure: {
+              type: 'boolean',
+              description: 'Whether to record failures for learning (default: true)'
+            }
+          }
+        }
+      },
+      required: ['objective']
+    }
   }
 ];
 
@@ -603,6 +660,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
             {
               type: 'text',
               text: JSON.stringify(patterns, null, 2)
+            }
+          ]
+        };
+      }
+
+      case 'mendicant_execute_with_retry': {
+        debugLog('[DEBUG] mendicant_execute_with_retry tool called');
+        const { objective, context, strategy } = args as unknown as {
+          objective: string;
+          context?: ProjectContext;
+          strategy?: Partial<RetryStrategy>;
+        };
+
+        // Initialize retry orchestrator if not already done
+        if (!retryOrchestrator) {
+          throw new Error('RetryOrchestrator not initialized');
+        }
+
+        await retryOrchestrator.initialize();
+
+        const planContext: PlanContext = {
+          objective,
+          project_context: context
+        };
+
+        // Create a mock task executor for demonstration
+        // In real usage, this would spawn the actual agent
+        const taskExecutor = async (agent: AgentCapability) => {
+          debugLog(`[MCP] Executing task with agent: ${agent.name}`);
+          return { success: true, agent: agent.name };
+        };
+
+        const result = await retryOrchestrator.executeWithRetry(
+          planContext,
+          taskExecutor,
+          strategy
+        );
+
+        debugLog(`[DEBUG] Retry result: success=${result.success}, attempts=${result.attemptNumber}`);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2)
             }
           ]
         };

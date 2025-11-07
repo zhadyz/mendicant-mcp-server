@@ -1,0 +1,22 @@
+{
+  "arr1": {
+    "value": [
+      "a",
+      "b",
+      "c"
+    ],
+    "metadata": {
+      "key": "arr1",
+      "createdAt": 1762484308877,
+      "updatedAt": 1762484308877,
+      "accessCount": 0,
+      "lastAccessedAt": 1762484308877,
+      "ttl": 86400000,
+      "layers": {
+        "l1": true,
+        "l2": true,
+        "l3": true
+      }
+    }
+  }
+}

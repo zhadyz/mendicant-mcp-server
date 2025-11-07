@@ -1,0 +1,89 @@
+/**
+ * ENHANCED ERROR CLASSIFIER - ADAPTATION 1
+ *
+ * Multi-dimensional error classification with hierarchical taxonomy.
+ * Provides actionable intelligence for automated recovery.
+ *
+ * ENHANCEMENT: Adds 4-dimensional classification:
+ * 1. Category → Sub-Type (17 granular types)
+ * 2. Domain (8 system layers)
+ * 3. Severity (4 impact levels)
+ * 4. Recovery Strategy (6 automated approaches)
+ */
+
+import type { ErrorSubType, ErrorDomain, SeverityLevel, RecoveryStrategy } from '../types.js';
+
+export type ErrorCategory =
+  | 'version_mismatch'
+  | 'api_rate_limit'
+  | 'authentication_error'
+  | 'permission_error'
+  | 'missing_dependency'
+  | 'compilation_error'
+  | 'type_error'
+  | 'syntax_error'
+  | 'runtime_error'
+  | 'test_failure'
+  | 'timeout'
+  | 'network_error'
+  | 'database_error'
+  | 'configuration_error'
+  | 'resource_exhausted'
+  | 'invalid_input'
+  | 'not_found'
+  | 'conflict'
+  | 'unknown';
+
+export interface ErrorClassification {
+  category: ErrorCategory;
+  confidence: number;
+  indicators: string[];
+  suggested_fix: string;
+  related_agent?: string;
+
+  // ADAPTATION 1: Multi-dimensional classification
+  sub_type?: ErrorSubType;
+  domain: ErrorDomain;
+  severity: SeverityLevel;
+  recovery_strategy: RecoveryStrategy;
+  estimated_recovery_time_minutes: number;
+  is_recoverable: boolean;
+}
+
+/**
+ * Detect granular sub-type within error category
+ */
+function detectSubType(category: ErrorCategory, errorMessage: string): ErrorSubType {
+  const lower = errorMessage.toLowerCase();
+
+  switch (category) {
+    case 'missing_dependency':
+      if (/peer.*dependency/i.test(lower)) return 'peer_dependency_missing';
+      if (/version.*conflict/i.test(lower) || /incompatible/i.test(lower)) return 'version_conflict';
+      if (/transitive/i.test(lower) || /indirect/i.test(lower)) return 'transitive_dependency_missing';
+      return 'direct_dependency_missing';
+
+    case 'type_error':
+      if (/null/i.test(lower)) return 'null_reference';
+      if (/undefined.*property/i.test(lower)) return 'undefined_property';
+      if (/type.*guard/i.test(lower)) return 'type_guard_failure';
+      return 'type_mismatch';
+
+    case 'network_error':
+      if (/econnrefused/i.test(lower) || /connection.*refused/i.test(lower)) return 'connection_refused';
+      if (/timeout/i.test(lower) || /etimeout/i.test(lower)) return 'connection_timeout';
+      if (/dns/i.test(lower) || /getaddrinfo/i.test(lower)) return 'dns_resolution_failed';
+      if (/ssl/i.test(lower) || /certificate/i.test(lower)) return 'ssl_certificate_error';
+      return 'connection_refused';
+
+    case 'configuration_error':
+      if (/env.*not.*set/i.test(lower) || /missing.*env/i.test(lower)) return 'missing_env_var';
+      if (/invalid.*value/i.test(lower) || /wrong.*type/i.test(lower)) return 'invalid_config_value';
+      if (/not.*found/i.test(lower) || /enoent/i.test(lower)) return 'config_file_not_found';
+      if (/parse/i.test(lower) || /invalid.*json/i.test(lower)) return 'config_parse_error';
+      return 'missing_env_var';
+
+    default:
+      return 'unknown_sub_type';
+  }
+}

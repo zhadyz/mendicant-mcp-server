@@ -15,6 +15,10 @@ import { feedbackLoop } from './knowledge/feedback_loop.js';
 import { adaptiveExecutor } from './knowledge/adaptive_executor.js';
 import { commBus } from './knowledge/agent_communication_bus.js';
 
+// CYCLE 5: Cross-project learning and feature flags
+import { CrossProjectLearningService } from './knowledge/cross_project_learning.js';
+import { featureFlags } from './config/feature_flags.js';
+
 // Legacy systems (gradually being replaced)
 import { analyzeObjectiveSemantic, getCapabilitiesFromAnalysis } from './knowledge/semantic_selector.js';
 import { checkMandatoryAgents, addMandatoryAgents } from './knowledge/mandatory_enforcer.js';
@@ -120,6 +124,26 @@ export async function createPlan(
   // Combine Mnemosyne patterns with provided pastExecutions
   const allPastExecutions = [...(pastExecutions || []), ...mnemosynePatterns];
 
+  // 0.6. CROSS-PROJECT LEARNING - Query successful agents from similar projects
+  // Load feature flags before using cross-project learning
+  await featureFlags.load();
+
+  let crossProjectAgents: string[] = [];
+  if (featureFlags.isEnabled('crossProjectLearning')) {
+    try {
+      const learningScope = featureFlags.get<any>('learning.scope');
+      const crossProjectService = new CrossProjectLearningService(learningScope);
+
+      crossProjectAgents = await crossProjectService.getSuccessfulAgentsFromSimilarProjects(objective);
+
+      if (crossProjectAgents.length > 0) {
+        console.log(`[CrossProjectLearning] Found ${crossProjectAgents.length} successful agents from similar projects:`, crossProjectAgents);
+      }
+    } catch (err) {
+      console.error('[CrossProjectLearning] Failed to query similar projects:', err);
+    }
+  }
+
   // 1. Try to reuse a proven pattern from past executions (RAM + Mnemosyne)
   if (allPastExecutions && allPastExecutions.length > 0) {
     const similarExecutions = findSimilarExecutions(objective, allPastExecutions);
@@ -144,8 +168,8 @@ export async function createPlan(
     };
   }
   
-  // 3. Generate custom plan
-  return generateCustomPlan(objective, context, constraints, pastExecutions);
+  // 3. Generate custom plan (with cross-project agents boost)
+  return generateCustomPlan(objective, context, constraints, pastExecutions, crossProjectAgents);
 }
 
 /**
@@ -155,7 +179,8 @@ async function generateCustomPlan(
   objective: string,
   context?: ProjectContext,
   constraints?: Constraints,
-  pastExecutions?: PastExecution[]
+  pastExecutions?: PastExecution[],
+  crossProjectAgents?: string[]
 ): Promise<OrchestrationPlan> {
 
   // Convert PastExecution[] to ExecutionPattern[] for temporal engine and other systems
@@ -195,6 +220,14 @@ async function generateCustomPlan(
       // Merge with selected agents, preferring recommended ones
       agents = [...new Set([...recommended, ...agents])];
     }
+  }
+
+  // CROSS-PROJECT LEARNING BOOST - Prioritize agents that succeeded in similar projects
+  if (crossProjectAgents && crossProjectAgents.length > 0) {
+    console.log(`[Planner] Boosting ${crossProjectAgents.length} agents from cross-project learning`);
+
+    // Merge cross-project agents with current agents, prioritizing cross-project ones
+    agents = [...new Set([...crossProjectAgents, ...agents])];
   }
 
   // Use Mahoraga predictive intelligence to rank agents by predicted success

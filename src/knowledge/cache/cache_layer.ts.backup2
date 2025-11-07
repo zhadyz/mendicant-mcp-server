@@ -1,0 +1,629 @@
+/**
+ * Three-Layer Cache System
+ *
+ * Architecture:
+ * - L1: Memory cache (instant, session lifetime, LRU eviction)
+ * - L2: Disk cache (fast, 24-hour TTL, persists across restarts)
+ * - L3: Mnemosyne cache (slow, 90-day TTL, cross-session learning)
+ *
+ * Read Path: L1 → L2 → L3
+ * Write Path: L1 ← L2 ← L3 (write-through to all layers)
+ * Refresh: L3 → L2 → L1 (on startup and periodically)
+ */
+
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { join } from 'path';
+import { homedir } from 'os';
+import { mnemosyneClient } from '../mnemosyne/client.js';
+import {
+  CACHE_CONFIG,
+  generateCacheKey,
+  parseCacheKey,
+  isExpired,
+  type CacheMetadata,
+  type CacheStats,
+  type LRUNode
+} from './cache_config.js';
+
+/**
+ * Cached entry with metadata
+ */
+interface CachedEntry<T> {
+  value: T;
+  metadata: CacheMetadata;
+}
+
+/**
+ * Disk cache format
+ */
+interface DiskCacheData {
+  version: string;
+  entries: Record<string, CachedEntry<any>>;
+  lastSync: number;
+}
+
+/**
+ * Three-layer cache implementation with LRU eviction and TTL enforcement
+ */
+export class CacheLayer<T = any> {
+  private namespace: string;
+  private l1Cache: Map<string, LRUNode<CachedEntry<T>>>;
+  private lruHead: LRUNode<CachedEntry<T>> | null = null;
+  private lruTail: LRUNode<CachedEntry<T>> | null = null;
+  private l1Size = 0;
+
+  private diskCachePath: string;
+  private stats: CacheStats;
+  private refreshInterval: NodeJS.Timeout | null = null;
+  private initialized = false;
+
+  constructor(namespace: string) {
+    this.namespace = namespace;
+    this.l1Cache = new Map();
+
+    // Setup disk cache path
+    const cacheDir = join(homedir(), CACHE_CONFIG.disk.cacheDir);
+    this.diskCachePath = join(cacheDir, `${namespace}_${CACHE_CONFIG.disk.fileName}`);
+
+    // Initialize stats
+    this.stats = {
+      l1: { hits: 0, misses: 0, evictions: 0, size: 0 },
+      l2: { hits: 0, misses: 0, size: 0 },
+      l3: { hits: 0, misses: 0, size: 0 },
+      totalHits: 0,
+      totalMisses: 0,
+      hitRate: 0
+    };
+
+    // Auto-initialize on first use
+    this.initialize().catch(err =>
+      console.error(`[CacheLayer:${namespace}] Failed to initialize:`, err)
+    );
+  }
+
+  /**
+   * Initialize cache - load from disk and optionally sync from Mnemosyne
+   */
+  async initialize(): Promise<void> {
+    if (this.initialized) return;
+
+    try {
+      // Load L2 cache from disk
+      await this.loadDiskCache();
+
+      // Refresh from L3 if configured
+      if (CACHE_CONFIG.refresh.onStartup) {
+        await this.refresh();
+      }
+
+      // Start periodic refresh if configured
+      if (CACHE_CONFIG.refresh.intervalMs > 0 && CACHE_CONFIG.refresh.backgroundSync) {
+        this.refreshInterval = setInterval(
+          () => this.refresh().catch(err =>
+            console.error(`[CacheLayer:${this.namespace}] Periodic refresh failed:`, err)
+          ),
+          CACHE_CONFIG.refresh.intervalMs
+        );
+      }
+
+      this.initialized = true;
+      this.log('info', 'Initialized successfully');
+    } catch (err) {
+      console.error(`[CacheLayer:${this.namespace}] Initialization error:`, err);
+      this.initialized = true; // Continue with empty cache
+    }
+  }
+
+  /**
+   * Get value from cache (L1 → L2 → L3)
+   */
+  async get(key: string): Promise<T | null> {
+    await this.initialize();
+    const cacheKey = generateCacheKey(this.namespace, key);
+
+    // L1: Memory cache check
+    const l1Result = this.getFromL1(cacheKey);
+    if (l1Result !== null) {
+      this.stats.l1.hits++;
+      this.stats.totalHits++;
+      this.updateHitRate();
+      this.log('debug', `L1 hit: ${key}`);
+      return l1Result;
+    }
+    this.stats.l1.misses++;
+
+    // L2: Disk cache check
+    const l2Result = await this.getFromL2(cacheKey);
+    if (l2Result !== null) {
+      this.stats.l2.hits++;
+      this.stats.totalHits++;
+      this.updateHitRate();
+
+      // Promote to L1
+      this.setToL1(cacheKey, l2Result);
+      this.log('debug', `L2 hit: ${key}`);
+      return l2Result.value;
+    }
+    this.stats.l2.misses++;
+
+    // L3: Mnemosyne check
+    const l3Result = await this.getFromL3(cacheKey);
+    if (l3Result !== null) {
+      this.stats.l3.hits++;
+      this.stats.totalHits++;
+      this.updateHitRate();
+
+      // Promote to L1 and L2
+      this.setToL1(cacheKey, l3Result);
+      await this.setToL2(cacheKey, l3Result);
+      this.log('debug', `L3 hit: ${key}`);
+      return l3Result.value;
+    }
+    this.stats.l3.misses++;
+    this.stats.totalMisses++;
+    this.updateHitRate();
+
+    this.log('debug', `Cache miss: ${key}`);
+    return null;
+  }
+
+  /**
+   * Set value in cache (write-through to all layers)
+   */
+  async set(key: string, value: T): Promise<void> {
+    await this.initialize();
+    const cacheKey = generateCacheKey(this.namespace, key);
+
+    const entry: CachedEntry<T> = {
+      value,
+      metadata: {
+        key: cacheKey,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        accessCount: 0,
+        lastAccessedAt: Date.now(),
+        ttl: CACHE_CONFIG.disk.ttlMs,
+        layers: {
+          l1: false,
+          l2: false,
+          l3: false
+        }
+      }
+    };
+
+    // Write-through to all layers
+    this.setToL1(cacheKey, entry);
+    entry.metadata.layers.l1 = true;
+
+    await this.setToL2(cacheKey, entry);
+    entry.metadata.layers.l2 = true;
+
+    if (mnemosyneClient.isConnected()) {
+      await this.setToL3(cacheKey, entry).catch(err =>
+        console.error(`[CacheLayer:${this.namespace}] L3 write failed:`, err)
+      );
+      entry.metadata.layers.l3 = true;
+    }
+
+    this.log('write', `Set: ${key}`);
+  }
+
+  /**
+   * Invalidate key from all cache layers
+   */
+  async invalidate(key: string): Promise<void> {
+    await this.initialize();
+    const cacheKey = generateCacheKey(this.namespace, key);
+
+    // Remove from L1
+    const node = this.l1Cache.get(cacheKey);
+    if (node) {
+      this.removeFromLRU(node);
+      this.l1Cache.delete(cacheKey);
+      this.l1Size--;
+    }
+
+    // Remove from L2 (handled by persistence)
+    await this.persistDiskCache();
+
+    // Remove from L3
+    if (mnemosyneClient.isConnected()) {
+      await this.removeFromL3(cacheKey).catch(err =>
+        console.error(`[CacheLayer:${this.namespace}] L3 invalidation failed:`, err)
+      );
+    }
+
+    this.log('write', `Invalidated: ${key}`);
+  }
+
+  /**
+   * Refresh cache from Mnemosyne (L3 → L2 → L1)
+   */
+  async refresh(): Promise<void> {
+    if (!mnemosyneClient.isConnected()) {
+      this.log('info', 'Mnemosyne not connected, skipping refresh');
+      return;
+    }
+
+    try {
+      const entities = await mnemosyneClient.searchNodes(
+        `entityType:"${CACHE_CONFIG.mnemosyne.entityType}" AND namespace:"${this.namespace}"`
+      );
+
+      for (const entity of entities) {
+        try {
+          const parsed = parseCacheKey(entity.name);
+          if (!parsed || parsed.namespace !== this.namespace) continue;
+
+          // Extract cached value from entity observations
+          const valueObs = entity.observations.find(obs =>
+            obs.content.startsWith('value:')
+          );
+          if (!valueObs) continue;
+
+          const valueStr = valueObs.content.substring('value:'.length);
+          const value = JSON.parse(valueStr) as T;
+
+          const entry: CachedEntry<T> = {
+            value,
+            metadata: {
+              key: entity.name,
+              createdAt: entity.createdAt || Date.now(),
+              updatedAt: entity.updatedAt || Date.now(),
+              accessCount: 0,
+              lastAccessedAt: Date.now(),
+              ttl: CACHE_CONFIG.mnemosyne.ttlMs,
+              layers: { l1: false, l2: false, l3: true }
+            }
+          };
+
+          // Check if expired
+          if (isExpired(entry.metadata.updatedAt, CACHE_CONFIG.mnemosyne.ttlMs)) {
+            if (CACHE_CONFIG.refresh.autoEvictStale) {
+              await this.removeFromL3(entity.name);
+            }
+            continue;
+          }
+
+          // Promote to L1 and L2
+          this.setToL1(entity.name, entry);
+          await this.setToL2(entity.name, entry);
+        } catch (err) {
+          console.error(`[CacheLayer:${this.namespace}] Failed to process entity:`, err);
+        }
+      }
+
+      this.log('info', `Refreshed ${entities.length} entries from Mnemosyne`);
+    } catch (err) {
+      console.error(`[CacheLayer:${this.namespace}] Refresh failed:`, err);
+    }
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getStats(): CacheStats {
+    return { ...this.stats };
+  }
+
+  /**
+   * Clear all cache layers
+   */
+  async clear(): Promise<void> {
+    this.l1Cache.clear();
+    this.lruHead = null;
+    this.lruTail = null;
+    this.l1Size = 0;
+
+    await this.persistDiskCache();
+
+    if (mnemosyneClient.isConnected()) {
+      const entities = await mnemosyneClient.searchNodes(
+        `entityType:"${CACHE_CONFIG.mnemosyne.entityType}" AND namespace:"${this.namespace}"`
+      );
+
+      for (const entity of entities) {
+        await this.removeFromL3(entity.name).catch(() => {});
+      }
+    }
+
+    this.log('write', 'Cleared all layers');
+  }
+
+  /**
+   * Cleanup and stop background tasks
+   */
+  destroy(): void {
+    if (this.refreshInterval) {
+      clearInterval(this.refreshInterval);
+      this.refreshInterval = null;
+    }
+  }
+
+  // Private L1 (Memory) Operations
+
+  private getFromL1(key: string): T | null {
+    const node = this.l1Cache.get(key);
+    if (!node) return null;
+
+    const entry = node.value;
+
+    // Check TTL
+    if (isExpired(entry.metadata.updatedAt, CACHE_CONFIG.disk.ttlMs)) {
+      this.removeFromLRU(node);
+      this.l1Cache.delete(key);
+      this.l1Size--;
+      return null;
+    }
+
+    // Update metadata
+    entry.metadata.accessCount++;
+    entry.metadata.lastAccessedAt = Date.now();
+
+    // Move to front (most recently used)
+    this.moveToFront(node);
+
+    return entry.value;
+  }
+
+  private setToL1(key: string, entry: CachedEntry<T>): void {
+    // Check if already exists
+    const existing = this.l1Cache.get(key);
+    if (existing) {
+      existing.value = entry;
+      this.moveToFront(existing);
+      return;
+    }
+
+    // Create new node
+    const node: LRUNode<CachedEntry<T>> = {
+      key,
+      value: entry,
+      timestamp: Date.now(),
+      prev: null,
+      next: null
+    };
+
+    // Add to cache and LRU
+    this.l1Cache.set(key, node);
+    this.addToFront(node);
+    this.l1Size++;
+
+    // Check for eviction
+    if (this.l1Size > CACHE_CONFIG.memory.maxEntries) {
+      this.evictLRU();
+    }
+
+    this.stats.l1.size = this.l1Size;
+  }
+
+  private addToFront(node: LRUNode<CachedEntry<T>>): void {
+    node.next = this.lruHead;
+    node.prev = null;
+
+    if (this.lruHead) {
+      this.lruHead.prev = node;
+    }
+
+    this.lruHead = node;
+
+    if (!this.lruTail) {
+      this.lruTail = node;
+    }
+  }
+
+  private removeFromLRU(node: LRUNode<CachedEntry<T>>): void {
+    if (node.prev) {
+      node.prev.next = node.next;
+    } else {
+      this.lruHead = node.next;
+    }
+
+    if (node.next) {
+      node.next.prev = node.prev;
+    } else {
+      this.lruTail = node.prev;
+    }
+  }
+
+  private moveToFront(node: LRUNode<CachedEntry<T>>): void {
+    if (node === this.lruHead) return;
+
+    this.removeFromLRU(node);
+    this.addToFront(node);
+  }
+
+  private evictLRU(): void {
+    if (!this.lruTail) return;
+
+    const evicted = this.lruTail;
+    this.removeFromLRU(evicted);
+    this.l1Cache.delete(evicted.key);
+    this.l1Size--;
+    this.stats.l1.evictions++;
+
+    this.log('eviction', `Evicted: ${evicted.key}`);
+  }
+
+  // Private L2 (Disk) Operations
+
+  private async getFromL2(key: string): Promise<CachedEntry<T> | null> {
+    try {
+      const diskData = await this.loadDiskCache();
+      const entry = diskData.entries[key];
+
+      if (!entry) return null;
+
+      // Check TTL
+      if (isExpired(entry.metadata.updatedAt, CACHE_CONFIG.disk.ttlMs)) {
+        return null;
+      }
+
+      // Update metadata
+      entry.metadata.accessCount++;
+      entry.metadata.lastAccessedAt = Date.now();
+
+      return entry;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  private async setToL2(key: string, entry: CachedEntry<T>): Promise<void> {
+    // Persistence is batched, just mark as dirty
+    await this.persistDiskCache();
+  }
+
+  private async loadDiskCache(): Promise<DiskCacheData> {
+    try {
+      const data = await readFile(this.diskCachePath, CACHE_CONFIG.disk.encoding);
+      const diskData: DiskCacheData = JSON.parse(data);
+
+      // Filter out expired entries
+      const validEntries: Record<string, CachedEntry<any>> = {};
+      let count = 0;
+
+      for (const [key, entry] of Object.entries(diskData.entries)) {
+        if (!isExpired(entry.metadata.updatedAt, CACHE_CONFIG.disk.ttlMs)) {
+          validEntries[key] = entry;
+          count++;
+        }
+      }
+
+      this.stats.l2.size = count;
+
+      return {
+        version: diskData.version || '1.0',
+        entries: validEntries,
+        lastSync: diskData.lastSync || Date.now()
+      };
+    } catch (err) {
+      // Cache doesn't exist or corrupted
+      return {
+        version: '1.0',
+        entries: {},
+        lastSync: Date.now()
+      };
+    }
+  }
+
+  private async persistDiskCache(): Promise<void> {
+    try {
+      const cacheDir = join(homedir(), CACHE_CONFIG.disk.cacheDir);
+      await mkdir(cacheDir, { recursive: true });
+
+      // Collect all L1 entries for persistence
+      const entries: Record<string, CachedEntry<any>> = {};
+      for (const [key, node] of this.l1Cache) {
+        entries[key] = node.value;
+      }
+
+      const diskData: DiskCacheData = {
+        version: '1.0',
+        entries,
+        lastSync: Date.now()
+      };
+
+      await writeFile(this.diskCachePath, JSON.stringify(diskData, null, 2), CACHE_CONFIG.disk.encoding);
+    } catch (err) {
+      console.error(`[CacheLayer:${this.namespace}] Failed to persist disk cache:`, err);
+    }
+  }
+
+  // Private L3 (Mnemosyne) Operations
+
+  private async getFromL3(key: string): Promise<CachedEntry<T> | null> {
+    if (!mnemosyneClient.isConnected()) return null;
+
+    try {
+      const entities = await mnemosyneClient.openNodes([key]);
+      if (entities.length === 0) return null;
+
+      const entity = entities[0];
+
+      // Extract value from observations
+      const valueObs = entity.observations.find(obs =>
+        obs.content.startsWith('value:')
+      );
+      if (!valueObs) return null;
+
+      const valueStr = valueObs.content.substring('value:'.length);
+      const value = JSON.parse(valueStr) as T;
+
+      const entry: CachedEntry<T> = {
+        value,
+        metadata: {
+          key,
+          createdAt: entity.createdAt || Date.now(),
+          updatedAt: entity.updatedAt || Date.now(),
+          accessCount: 0,
+          lastAccessedAt: Date.now(),
+          ttl: CACHE_CONFIG.mnemosyne.ttlMs,
+          layers: { l1: false, l2: false, l3: true }
+        }
+      };
+
+      // Check TTL
+      if (isExpired(entry.metadata.updatedAt, CACHE_CONFIG.mnemosyne.ttlMs)) {
+        await this.removeFromL3(key);
+        return null;
+      }
+
+      return entry;
+    } catch (err) {
+      console.error(`[CacheLayer:${this.namespace}] L3 read failed:`, err);
+      return null;
+    }
+  }
+
+  private async setToL3(key: string, entry: CachedEntry<T>): Promise<void> {
+    if (!mnemosyneClient.isConnected()) return;
+
+    try {
+      await mnemosyneClient.createEntities([{
+        name: key,
+        entityType: CACHE_CONFIG.mnemosyne.entityType,
+        observations: [
+          `namespace:${this.namespace}`,
+          `value:${JSON.stringify(entry.value)}`,
+          `createdAt:${entry.metadata.createdAt}`,
+          `updatedAt:${entry.metadata.updatedAt}`
+        ]
+      }]);
+    } catch (err) {
+      console.error(`[CacheLayer:${this.namespace}] L3 write failed:`, err);
+      throw err;
+    }
+  }
+
+  private async removeFromL3(key: string): Promise<void> {
+    if (!mnemosyneClient.isConnected()) return;
+
+    try {
+      await mnemosyneClient.deleteEntities([key]);
+    } catch (err) {
+      console.error(`[CacheLayer:${this.namespace}] L3 delete failed:`, err);
+    }
+  }
+
+  // Utility methods
+
+  private updateHitRate(): void {
+    const total = this.stats.totalHits + this.stats.totalMisses;
+    this.stats.hitRate = total > 0 ? this.stats.totalHits / total : 0;
+  }
+
+  private log(level: 'debug' | 'info' | 'write' | 'eviction' | 'error', message: string): void {
+    const shouldLog = (
+      (level === 'debug' && (CACHE_CONFIG.logging.cacheHits || CACHE_CONFIG.logging.cacheMisses)) ||
+      (level === 'info' && true) ||
+      (level === 'write' && CACHE_CONFIG.logging.writeOperations) ||
+      (level === 'eviction' && CACHE_CONFIG.logging.evictions) ||
+      (level === 'error' && CACHE_CONFIG.logging.errors)
+    );
+
+    if (shouldLog) {
+      console.log(`[CacheLayer:${this.namespace}] ${message}`);
+    }
+  }
+}

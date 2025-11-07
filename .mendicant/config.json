@@ -1,0 +1,40 @@
+{
+  "features": {
+    "embeddings": {
+      "enabled": true,
+      "fallbackToKeywords": true,
+      "provider": "auto",
+      "_comment": "Provider options: 'auto' (Mnemosyne → OpenAI → keyword), 'mnemosyne', 'openai', 'keyword'. Default 'auto' uses Mnemosyne BGE-large if available (free, local, no API key needed)."
+    },
+    "realtimeSync": {
+      "enabled": true,
+      "fallbackToAsync": true,
+      "timeout": 500
+    },
+    "crossProjectLearning": {
+      "enabled": true,
+      "querySimilar": true,
+      "maxSimilarProjects": 5
+    },
+    "semanticMatching": {
+      "enabled": true,
+      "weight": 0.30,
+      "_comment": "Semantic matching uses embeddings for intelligent agent selection. With Mnemosyne BGE-large (default), this is completely free and runs locally."
+    },
+    "retry": {
+      "enabled": true,
+      "maxAttempts": 3,
+      "fallbackScoreThreshold": 0.5,
+      "learnFromFailure": true,
+      "timeout": 300000
+    }
+  },
+  "learning": {
+    "scope": {
+      "level": "project",
+      "identifier": "mendicant",
+      "canShare": true,
+      "sensitivity": "internal"
+    }
+  }
+}

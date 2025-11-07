@@ -1,0 +1,373 @@
+/**
+ * Intelligent Agent Registry
+ *
+ * Three-tier discovery system:
+ * 1. Hardcoded defaults (zero-config, instant)
+ * 2. Learned agents from mnemosyne (proven performers)
+ * 3. Runtime feedback (discovers new agents during execution)
+ *
+ * Brutally efficient:
+ * - Memory cache (zero latency)
+ * - Disk cache (persists across restarts)
+ * - Lazy loading (only query mnemosyne on cache miss)
+ * - Async updates (don't block planning)
+ */
+
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { join } from 'path';
+import { homedir } from 'os';
+import type { AgentId, AgentCapability, LearnedAgent, AgentFeedback } from '../types.js';
+import { AGENT_CAPABILITIES } from './agent_capabilities.js';
+import { mnemosyneClient } from './mnemosyne/client.js';
+import { SyncQueue } from './mnemosyne/sync.js';
+import type { ExecutionRecord } from './mnemosyne/client.js';
+
+const CACHE_DIR = join(homedir(), '.mendicant');
+const CACHE_FILE = join(CACHE_DIR, 'learned_agents.json');
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+interface CachedData {
+  learned_agents: Record<AgentId, LearnedAgent>;
+  last_updated: number;
+}
+
+export class AgentRegistry {
+  private memoryCache: Map<AgentId, AgentCapability> = new Map();
+  private learnedAgents: Map<AgentId, LearnedAgent> = new Map();
+  private cacheLoaded = false;
+  private cacheLoadPromise: Promise<void> | null = null;
+  private syncQueue: SyncQueue;
+
+  constructor() {
+    console.error('[DEBUG] AgentRegistry constructor called');
+    console.error('[DEBUG] AGENT_CAPABILITIES keys:', Object.keys(AGENT_CAPABILITIES));
+    console.error('[DEBUG] AGENT_CAPABILITIES entries:', Object.keys(AGENT_CAPABILITIES).length);
+
+    // Initialize sync queue for async Mnemosyne operations
+    this.syncQueue = new SyncQueue(mnemosyneClient);
+    this.syncQueue.start();
+
+    // Start with hardcoded defaults in memory
+    for (const [id, spec] of Object.entries(AGENT_CAPABILITIES)) {
+      this.memoryCache.set(id, spec);
+      console.error('[DEBUG] Added agent to memoryCache:', id);
+
+      // Create agent profile in Mnemosyne (async, non-blocking)
+      this.syncQueue.enqueue({
+        type: 'create_profile',
+        data: spec
+      });
+    }
+    console.error('[DEBUG] memoryCache size after constructor:', this.memoryCache.size);
+  }
+
+  /**
+   * Get all known agents (hardcoded + learned)
+   * Brutally efficient: memory-first, lazy-load disk cache
+   */
+  async getAllAgents(): Promise<Record<AgentId, AgentCapability>> {
+    console.error('[DEBUG] getAllAgents called, memoryCache size:', this.memoryCache.size);
+    await this.ensureCacheLoaded();
+    console.error('[DEBUG] After ensureCacheLoaded, memoryCache size:', this.memoryCache.size);
+
+    const agents: Record<AgentId, AgentCapability> = {};
+
+    // Merge hardcoded and learned agents
+    for (const [id, spec] of this.memoryCache) {
+      console.error('[DEBUG] Processing memoryCache entry:', id);
+      const learned = this.learnedAgents.get(id);
+      agents[id] = this.mergeAgentData(spec, learned);
+    }
+
+    console.error('[DEBUG] After memoryCache loop, agents keys:', Object.keys(agents));
+
+    // Add purely learned agents (not in hardcoded set)
+    for (const [id, learned] of this.learnedAgents) {
+      if (!agents[id]) {
+        agents[id] = this.learnedToCapability(learned);
+      }
+    }
+
+    console.error('[DEBUG] Final agents count:', Object.keys(agents).length);
+    return agents;
+  }
+
+  /**
+   * Get agent by ID with adaptive ranking
+   */
+  async getAgent(agentId: AgentId): Promise<AgentCapability | null> {
+    await this.ensureCacheLoaded();
+
+    const hardcoded = this.memoryCache.get(agentId);
+    const learned = this.learnedAgents.get(agentId);
+
+    if (!hardcoded && !learned) return null;
+
+    return this.mergeAgentData(hardcoded, learned);
+  }
+
+  /**
+   * Record agent feedback - passive learning
+   * Async, doesn't block caller
+   */
+  async recordFeedback(feedback: AgentFeedback): Promise<void> {
+    const agentId = feedback.agent_id;
+    let learned = this.learnedAgents.get(agentId);
+
+    if (!learned) {
+      // Discover new agent
+      learned = {
+        agent_id: agentId,
+        discovered_at: Date.now(),
+        last_used: Date.now(),
+        total_executions: 0,
+        successful_executions: 0,
+        failed_executions: 0,
+        avg_token_usage: 0
+      };
+    }
+
+    // Update statistics
+    learned.last_used = Date.now();
+    learned.total_executions++;
+
+    if (feedback.success) {
+      learned.successful_executions++;
+    } else {
+      learned.failed_executions++;
+    }
+
+    // Update rolling average for tokens
+    if (feedback.tokens_used) {
+      const totalTokens = learned.avg_token_usage * (learned.total_executions - 1);
+      learned.avg_token_usage = (totalTokens + feedback.tokens_used) / learned.total_executions;
+    }
+
+    this.learnedAgents.set(agentId, learned);
+
+    // Persist to disk (async, non-blocking)
+    this.persistCache().catch(err =>
+      console.error('Failed to persist agent cache:', err)
+    );
+
+    // Store in mnemosyne for cross-session learning (async, non-blocking)
+    this.storeInMnemosyne(feedback).catch(err =>
+      console.error('Failed to store in mnemosyne:', err)
+    );
+  }
+
+  /**
+   * Discover agents from context (Claude tells us what agents exist)
+   */
+  async discoverAgents(agentIds: AgentId[]): Promise<void> {
+    for (const agentId of agentIds) {
+      if (!this.learnedAgents.has(agentId) && !this.memoryCache.has(agentId)) {
+        // New agent discovered
+        this.learnedAgents.set(agentId, {
+          agent_id: agentId,
+          discovered_at: Date.now(),
+          last_used: Date.now(),
+          total_executions: 0,
+          successful_executions: 0,
+          failed_executions: 0,
+          avg_token_usage: 40000 // Default estimate
+        });
+      }
+    }
+
+    await this.persistCache();
+  }
+
+  /**
+   * Get agents ranked by success rate
+   */
+  async getRankedAgents(): Promise<AgentCapability[]> {
+    const agents = await this.getAllAgents();
+
+    return Object.values(agents).sort((a, b) => {
+      return b.success_rate - a.success_rate;
+    });
+  }
+
+  // Private helpers
+
+  private async ensureCacheLoaded(): Promise<void> {
+    if (this.cacheLoaded) return;
+
+    // Prevent concurrent loads
+    if (this.cacheLoadPromise) {
+      return this.cacheLoadPromise;
+    }
+
+    this.cacheLoadPromise = this.loadCache();
+    await this.cacheLoadPromise;
+    this.cacheLoadPromise = null;
+  }
+
+  private async loadCache(): Promise<void> {
+    try {
+      const data = await readFile(CACHE_FILE, 'utf-8');
+      const cached: CachedData = JSON.parse(data);
+
+      // Check if cache is stale
+      if (Date.now() - cached.last_updated > CACHE_TTL_MS) {
+        // Stale cache, refresh from mnemosyne in background
+        this.refreshFromMnemosyne().catch(err =>
+          console.error('Failed to refresh from mnemosyne:', err)
+        );
+      }
+
+      // Load learned agents into memory
+      for (const [id, learned] of Object.entries(cached.learned_agents)) {
+        this.learnedAgents.set(id, learned);
+      }
+
+      this.cacheLoaded = true;
+    } catch (err) {
+      // Cache doesn't exist or is corrupted, start fresh
+      this.cacheLoaded = true;
+    }
+  }
+
+  private async persistCache(): Promise<void> {
+    try {
+      await mkdir(CACHE_DIR, { recursive: true });
+
+      const data: CachedData = {
+        learned_agents: Object.fromEntries(this.learnedAgents),
+        last_updated: Date.now()
+      };
+
+      await writeFile(CACHE_FILE, JSON.stringify(data, null, 2));
+    } catch (err) {
+      console.error('Failed to persist cache:', err);
+    }
+  }
+
+  private mergeAgentData(
+    hardcoded: AgentCapability | undefined,
+    learned: LearnedAgent | undefined
+  ): AgentCapability {
+    if (!hardcoded && !learned) {
+      throw new Error('Cannot merge with both undefined');
+    }
+
+    if (!learned) return hardcoded!;
+    if (!hardcoded) return this.learnedToCapability(learned);
+
+    // Merge: prefer hardcoded structure, but use learned statistics
+    const successRate = learned.total_executions > 0
+      ? learned.successful_executions / learned.total_executions
+      : hardcoded.success_rate;
+
+    return {
+      ...hardcoded,
+      success_rate: successRate,
+      avg_token_usage: learned.avg_token_usage || hardcoded.avg_token_usage
+    };
+  }
+
+  private learnedToCapability(learned: LearnedAgent): AgentCapability {
+    const successRate = learned.total_executions > 0
+      ? learned.successful_executions / learned.total_executions
+      : 0.5; // Unknown agents start at 50%
+
+    return {
+      name: learned.agent_id,
+      specialization: learned.specialization || 'custom_agent',
+      capabilities: learned.capabilities || [],
+      tools: learned.tools || [],
+      typical_use_cases: learned.typical_use_cases || [],
+      avg_token_usage: learned.avg_token_usage,
+      success_rate: successRate
+    };
+  }
+
+  private async storeInMnemosyne(feedback: AgentFeedback): Promise<void> {
+    // Store agent execution in Mnemosyne knowledge graph via sync queue
+    try {
+      const executionRecord: ExecutionRecord = {
+        agent_id: feedback.agent_id,
+        objective: 'feedback_execution', // Generic objective for feedback-based records
+        success: feedback.success,
+        tokens_used: feedback.tokens_used,
+        duration_ms: feedback.duration_ms,
+        error_message: feedback.error,
+        timestamp: Date.now()
+      };
+
+      // Enqueue for async processing (non-blocking)
+      this.syncQueue.enqueue({
+        type: 'record_execution',
+        data: executionRecord
+      });
+
+      console.log(`[AgentRegistry] Enqueued execution record for ${feedback.agent_id}`);
+    } catch (err) {
+      console.error('[AgentRegistry] Failed to enqueue execution for Mnemosyne:', err);
+    }
+  }
+
+  private async refreshFromMnemosyne(): Promise<void> {
+    // Query Mnemosyne for agent performance metrics and update learned agents
+    try {
+      if (!mnemosyneClient.isConnected()) {
+        console.log('[AgentRegistry] Mnemosyne not connected, skipping refresh');
+        return;
+      }
+
+      // Query performance metrics for all known agents
+      const agentIds = [
+        ...Array.from(this.memoryCache.keys()),
+        ...Array.from(this.learnedAgents.keys())
+      ];
+
+      for (const agentId of agentIds) {
+        try {
+          const metrics = await mnemosyneClient.queryAgentPerformance(agentId);
+
+          if (metrics) {
+            // Update or create learned agent entry
+            let learned = this.learnedAgents.get(agentId);
+
+            if (!learned) {
+              learned = {
+                agent_id: agentId,
+                discovered_at: Date.now(),
+                last_used: metrics.last_execution,
+                total_executions: 0,
+                successful_executions: 0,
+                failed_executions: 0,
+                avg_token_usage: 0
+              };
+            }
+
+            // Merge Mnemosyne metrics with local data
+            learned.total_executions = Math.max(learned.total_executions, metrics.total_executions);
+            learned.successful_executions = Math.max(learned.successful_executions, metrics.successful_executions);
+            learned.failed_executions = Math.max(learned.failed_executions, metrics.failed_executions);
+            learned.avg_token_usage = metrics.avg_tokens || learned.avg_token_usage;
+            learned.last_used = Math.max(learned.last_used, metrics.last_execution);
+
+            this.learnedAgents.set(agentId, learned);
+
+            console.log(`[AgentRegistry] Refreshed metrics for ${agentId} from Mnemosyne`);
+          }
+        } catch (agentErr) {
+          console.error(`[AgentRegistry] Failed to refresh metrics for ${agentId}:`, agentErr);
+          // Continue with next agent on error
+        }
+      }
+
+      // Persist updated cache to disk
+      await this.persistCache();
+
+      console.log(`[AgentRegistry] Refreshed ${agentIds.length} agents from Mnemosyne`);
+    } catch (err) {
+      console.error('[AgentRegistry] Failed to refresh from Mnemosyne:', err);
+    }
+  }
+}
+
+// Singleton instance
+export const agentRegistry = new AgentRegistry();

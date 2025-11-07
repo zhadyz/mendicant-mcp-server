@@ -84,10 +84,24 @@ export function analyzeObjectiveSemantic(objective: string): ObjectiveAnalysis {
  * Detects the primary intent behind the objective
  */
 function detectIntent(objective: string): Intent {
+  // DEPLOY - Check this FIRST before CREATE_NEW to catch infrastructure setup
+  // Includes both traditional deployment verbs AND setup verbs with infrastructure context
+  if (
+    // Traditional deployment verbs (don't need infrastructure keywords)
+    /\b(deploy|release|publish|ship|launch)\b/.test(objective) ||
+    // Setup verbs WITH infrastructure keywords
+    (
+      /\b(provision|configure|setup|install|establish|initialize)\b/.test(objective) &&
+      /\b(infrastructure|cloud|production|server|cluster|environment|deployment|resources)\b/.test(objective)
+    )
+  ) {
+    return 'deploy';
+  }
+
   // CREATE_NEW - Building from scratch
   if (
-    /\b(create|build|generate|make|develop|implement|add)\s+(a|an|new)/.test(objective) ||
-    /^(create|build|generate|make)\s+\w+/.test(objective)
+    /\b(create|build|generate|make|develop|implement|add|setup|configure|install|provision|establish|initialize)\s+(a|an|new)/.test(objective) ||
+    /^(create|build|generate|make|setup|configure|install|provision)\s+\w+/.test(objective)
   ) {
     return 'create_new';
   }
@@ -118,7 +132,7 @@ function detectIntent(objective: string): Intent {
 
   // MODIFY_EXISTING - Changing what exists
   if (
-    /\b(update|modify|change|edit|adjust|refactor|improve|enhance)\b/.test(objective) &&
+    /\b(update|modify|change|edit|adjust|refactor|improve|enhance|style|restyle|redesign)\b/.test(objective) &&
     !/\b(create|build|new)\b/.test(objective)
   ) {
     return 'modify_existing';
@@ -130,13 +144,6 @@ function detectIntent(objective: string): Intent {
     /\b(docs|documentation|readme)\b/.test(objective)
   ) {
     return 'document';
-  }
-
-  // DEPLOY - Shipping and releasing
-  if (
-    /\b(deploy|release|publish|ship|launch)\b/.test(objective)
-  ) {
-    return 'deploy';
   }
 
   // OPTIMIZE - Performance and cleanup
@@ -198,9 +205,14 @@ function detectDomain(objective: string, intent: Intent): Domain {
   }
 
   // INFRASTRUCTURE - DevOps, CI/CD, deployment
+  // Check for infrastructure/cloud platform keywords
   if (
-    /\b(docker|kubernetes|k8s|ci\/cd|pipeline|github actions|vercel|deploy|infrastructure)\b/.test(objective) ||
-    /\b(container|orchestration|cloud|aws|azure|gcp)\b/.test(objective)
+    /\b(docker|kubernetes|k8s|ci\/cd|pipeline|github actions|vercel|infrastructure)\b/.test(objective) ||
+    /\b(aws|azure|gcp|cloud)\b/.test(objective) && intent === 'deploy' ||
+    (
+      /\b(container|cloud|aws|azure|gcp|cluster)\b/.test(objective) &&
+      /\b(orchestration)\b/.test(objective)
+    )
   ) {
     return 'infrastructure';
   }
@@ -214,9 +226,31 @@ function detectDomain(objective: string, intent: Intent): Domain {
   }
 
   // UI_UX - Design systems and user interfaces
+  // Check for explicit UI/UX keywords first
+  // BUT: "React component" without design/UI context should be code domain
   if (
-    /\b(ui|ux|design system|component library|interface|frontend|react|vue|svelte)\b/.test(objective) &&
-    /\b(design|style|layout|responsive|component)\b/.test(objective)
+    /\b(ui|ux|design system|component library|interface|frontend)\b/.test(objective) ||
+    (
+      /\b(react|vue|svelte)\b/.test(objective) &&
+      /\b(design|interface|layout|styling|visual|dashboard)\b/.test(objective)
+    )
+  ) {
+    return 'ui_ux';
+  }
+
+  // Check for visual/styling keywords, but exclude database-related design
+  if (
+    /\b(style|layout|responsive|visual|dashboard|visualization)\b/.test(objective) &&
+    !/\b(database|schema|table|sql)\b/.test(objective)
+  ) {
+    return 'ui_ux';
+  }
+
+  // "design" keyword only triggers ui_ux if combined with UI-related context
+  if (
+    /\b(design)\b/.test(objective) &&
+    /\b(component|interface|layout|page|screen|view|mockup|prototype)\b/.test(objective) &&
+    !/\b(database|schema|table|api|system architecture)\b/.test(objective)
   ) {
     return 'ui_ux';
   }
@@ -336,7 +370,8 @@ function recommendAgents(
   // CREATIVE TASKS - Very specific handling
   if (task_type === 'creative') {
     agents.push('the_scribe'); // Creative writing and content generation
-    reasoning = `Creative task detected (${domain}). the_scribe specializes in creative content generation.`;
+    agents.push('cinna'); // Visual design and creative content
+    reasoning = `Creative task detected (${domain}). Creative content specialists selected.`;
     return { agents, confidence: 0.95, reasoning };
   }
 
@@ -370,12 +405,27 @@ function recommendAgents(
     return { agents, confidence: 0.9, reasoning };
   }
 
+  // UI_UX DOMAIN TASKS - Design and visual work
+  if (domain === 'ui_ux') {
+    agents.push('cinna'); // Design specialist
+    if (intent === 'create_new' || intent === 'design') {
+      agents.push('the_architect'); // System design
+    }
+    agents.push('hollowed_eyes'); // Implementation
+    reasoning = `UI/UX task in ${domain} domain. Design and implementation specialists selected.`;
+    return { agents, confidence: 0.9, reasoning };
+  }
+
   // TECHNICAL TASKS - Code implementation
   if (task_type === 'technical') {
     // Intent-based selection
     switch (intent) {
       case 'create_new':
       case 'modify_existing':
+        // Check if task involves visual/design work (beyond pure ui_ux domain)
+        if (/\b(visual|dashboard|interface|design|component library)\b/.test(objective)) {
+          agents.push('cinna'); // Design first
+        }
         agents.push('hollowed_eyes'); // Primary implementation
         if (complexity === 'complex') {
           agents.push('the_architect'); // For complex architectural decisions

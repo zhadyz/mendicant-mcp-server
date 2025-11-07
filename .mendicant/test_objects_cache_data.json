@@ -1,0 +1,24 @@
+{
+  "obj1": {
+    "value": {
+      "id": 1,
+      "name": "test",
+      "nested": {
+        "value": "nested_value"
+      }
+    },
+    "metadata": {
+      "key": "obj1",
+      "createdAt": 1762484308874,
+      "updatedAt": 1762484308874,
+      "accessCount": 0,
+      "lastAccessedAt": 1762484308874,
+      "ttl": 86400000,
+      "layers": {
+        "l1": true,
+        "l2": true,
+        "l3": true
+      }
+    }
+  }
+}
