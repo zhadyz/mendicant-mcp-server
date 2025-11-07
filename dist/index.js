@@ -49,7 +49,7 @@ debugLog(`[DEBUG] agentRegistry imported: ${typeof agentRegistry}`);
  */
 const server = new Server({
     name: 'mendicant-mcp-server',
-    version: '0.4.0',
+    version: '0.5.0',
 }, {
     capabilities: {
         tools: {},
