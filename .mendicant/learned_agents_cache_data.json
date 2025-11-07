@@ -1,0 +1,50 @@
+{
+  "the_architect": {
+    "value": {
+      "agent_id": "the_architect",
+      "discovered_at": 1762489764851,
+      "last_used": 1762489764851,
+      "total_executions": 1,
+      "successful_executions": 1,
+      "failed_executions": 0,
+      "avg_token_usage": 5000
+    },
+    "metadata": {
+      "key": "the_architect",
+      "createdAt": 1762489764851,
+      "updatedAt": 1762489764851,
+      "accessCount": 0,
+      "lastAccessedAt": 1762489764851,
+      "ttl": 86400000,
+      "layers": {
+        "l1": true,
+        "l2": true,
+        "l3": true
+      }
+    }
+  },
+  "hollowed_eyes": {
+    "value": {
+      "agent_id": "hollowed_eyes",
+      "discovered_at": 1762489764851,
+      "last_used": 1762489764851,
+      "total_executions": 1,
+      "successful_executions": 1,
+      "failed_executions": 0,
+      "avg_token_usage": 8000
+    },
+    "metadata": {
+      "key": "hollowed_eyes",
+      "createdAt": 1762489764851,
+      "updatedAt": 1762489764851,
+      "accessCount": 0,
+      "lastAccessedAt": 1762489764851,
+      "ttl": 86400000,
+      "layers": {
+        "l1": true,
+        "l2": true,
+        "l3": true
+      }
+    }
+  }
+}
