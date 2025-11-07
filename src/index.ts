@@ -57,7 +57,7 @@ debugLog(`[DEBUG] agentRegistry imported: ${typeof agentRegistry}`);
 const server = new Server(
   {
     name: 'mendicant-mcp-server',
-    version: '0.1.1',
+    version: '0.4.0',
   },
   {
     capabilities: {
