@@ -15,6 +15,7 @@ import { type ObjectiveAnalysis } from './semantic_selector.js';
  * Agent recommendation with confidence and reasoning
  */
 export interface AgentRecommendation {
+    agent_id: string;
     agent: AgentCapability;
     score: number;
     confidence: number;

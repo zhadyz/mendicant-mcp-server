@@ -63,6 +63,7 @@ export class IntelligentSelector {
         // Confidence calculation (based on data availability)
         const confidence = this.calculateConfidence(semanticScore, historicalPerf, contextScore);
         return {
+            agent_id: agent.name, // FIX: Add agent_id field
             agent,
             score: totalScore,
             confidence,

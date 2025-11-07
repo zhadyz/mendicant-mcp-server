@@ -19,6 +19,7 @@ import { agentRegistry } from './agent_registry.js';
  * Agent recommendation with confidence and reasoning
  */
 export interface AgentRecommendation {
+  agent_id: string;  // Agent identifier for easy reference
   agent: AgentCapability;
   score: number;
   confidence: number;
@@ -119,6 +120,7 @@ export class IntelligentSelector {
     );
 
     return {
+      agent_id: agent.name,  // FIX: Add agent_id field
       agent,
       score: totalScore,
       confidence,
