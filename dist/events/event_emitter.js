@@ -26,6 +26,10 @@ export var OrchestrationEventType;
     OrchestrationEventType["AGENT_EXECUTION_STARTED"] = "agent:execution_started";
     OrchestrationEventType["AGENT_EXECUTION_COMPLETED"] = "agent:execution_completed";
     OrchestrationEventType["AGENT_EXECUTION_FAILED"] = "agent:execution_failed";
+    // Agent internal operations (from transcript watcher)
+    OrchestrationEventType["AGENT_THINKING"] = "agent:thinking";
+    OrchestrationEventType["AGENT_TOOL_USE"] = "agent:tool_use";
+    OrchestrationEventType["AGENT_TOOL_RESULT"] = "agent:tool_result";
     // Coordination
     OrchestrationEventType["COORDINATION_STARTED"] = "coordination:started";
     OrchestrationEventType["COORDINATION_COMPLETED"] = "coordination:completed";

@@ -19,6 +19,12 @@ import { analyzeProject } from './analyzer.js';
 import { agentRegistry } from './knowledge/agent_registry.js';
 // PHASE 3: Retry Orchestration
 import { RetryOrchestrator } from './orchestration/retry_orchestrator.js';
+// Dashboard Integration
+import { createDashboardBridge } from './events/dashboard_bridge.js';
+import { createDashboardLauncher } from './events/dashboard_launcher.js';
+import { agentTranscriptWatcher } from './events/agent_transcript_watcher.js';
+// Event Instrumentation
+import { InstrumentedWrapper } from './events/instrumentation.js';
 // Debug: File-based logging
 const DEBUG_LOG = join(tmpdir(), 'mendicant-debug.log');
 function debugLog(msg) {
@@ -435,9 +441,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const { objective, context, constraints, past_executions } = args;
                 debugLog(`[DEBUG] objective: ${objective}`);
                 debugLog(`[DEBUG] context: ${JSON.stringify(context)}`);
-                const plan = await createPlan(objective, context, constraints, past_executions);
-                debugLog(`[DEBUG] plan created, agents: ${plan.agents.length}`);
-                debugLog(`[DEBUG] plan agents: ${JSON.stringify(plan.agents.map(a => a.agent_id))}`);
+                // Wrap with instrumentation for dashboard events
+                const plan = await InstrumentedWrapper.wrapPlanCreation(objective, context, constraints, async () => {
+                    const result = await createPlan(objective, context, constraints, past_executions);
+                    debugLog(`[DEBUG] plan created, agents: ${result.agents.length}`);
+                    debugLog(`[DEBUG] plan agents: ${JSON.stringify(result.agents.map(a => a.agent_id))}`);
+                    return result;
+                });
                 return {
                     content: [
                         {
@@ -449,7 +459,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case 'mendicant_coordinate': {
                 const { objective, agent_results, plan, project_context } = args;
-                const coordination = await coordinateResults(objective, agent_results, plan, project_context);
+                // Wrap with instrumentation for dashboard events
+                const coordination = await InstrumentedWrapper.wrapCoordination(objective, agent_results, async () => {
+                    return await coordinateResults(objective, agent_results, plan, project_context);
+                });
                 return {
                     content: [
                         {
@@ -630,6 +643,67 @@ async function main() {
     debugLog(`[DEBUG] Agents at startup: ${Object.keys(agents).length}`);
     debugLog(`[DEBUG] Agent IDs: ${Object.keys(agents).join(', ')}`);
     debugLog(`[DEBUG] Debug log file: ${DEBUG_LOG}`);
+    // Initialize Dashboard Infrastructure
+    try {
+        debugLog('[Dashboard] Initializing dashboard infrastructure...');
+        // Start SSE bridge server (port 3001)
+        const dashboardBridge = createDashboardBridge({
+            port: parseInt(process.env.DASHBOARD_BRIDGE_PORT || '3001', 10),
+            host: '127.0.0.1',
+            cors_origin: '*'
+        });
+        await dashboardBridge.start();
+        debugLog('[Dashboard] SSE bridge started on port 3001');
+        // Start agent transcript watcher
+        await agentTranscriptWatcher.start();
+        debugLog('[Dashboard] Agent transcript watcher started');
+        // Start Next.js dashboard (port 3000)
+        const dashboardLauncher = createDashboardLauncher({
+            autoStart: process.env.MENDICANT_AUTO_LAUNCH_DASHBOARD !== 'false',
+            port: parseInt(process.env.DASHBOARD_PORT || '3000', 10)
+        });
+        if (process.env.MENDICANT_AUTO_LAUNCH_DASHBOARD !== 'false') {
+            await dashboardLauncher.start();
+            debugLog('[Dashboard] Next.js dashboard started on port 3000');
+            // Auto-open browser to dashboard (cross-platform)
+            if (process.env.MENDICANT_AUTO_OPEN_BROWSER !== 'false') {
+                const dashboardUrl = `http://localhost:${process.env.DASHBOARD_PORT || '3000'}/realtime`;
+                debugLog(`[Dashboard] Opening browser to ${dashboardUrl}`);
+                const { exec } = await import('child_process');
+                const openCommand = process.platform === 'win32' ? 'start' :
+                    process.platform === 'darwin' ? 'open' : 'xdg-open';
+                exec(`${openCommand} ${dashboardUrl}`, (error) => {
+                    if (error) {
+                        debugLog(`[Dashboard] Failed to auto-open browser: ${error.message}`);
+                    }
+                });
+            }
+        }
+        else {
+            debugLog('[Dashboard] Auto-launch disabled via MENDICANT_AUTO_LAUNCH_DASHBOARD=false');
+        }
+        // Graceful shutdown handlers
+        const shutdown = async (signal) => {
+            debugLog(`[Shutdown] Received ${signal}, shutting down gracefully...`);
+            try {
+                await dashboardLauncher.stop();
+                await dashboardBridge.stop();
+                agentTranscriptWatcher.stop();
+                debugLog('[Shutdown] Dashboard infrastructure stopped');
+                process.exit(0);
+            }
+            catch (error) {
+                debugLog(`[Shutdown] Error during shutdown: ${error}`);
+                process.exit(1);
+            }
+        };
+        process.on('SIGINT', () => shutdown('SIGINT'));
+        process.on('SIGTERM', () => shutdown('SIGTERM'));
+    }
+    catch (error) {
+        debugLog(`[Dashboard] Failed to initialize dashboard: ${error}`);
+        debugLog('[Dashboard] MCP server will continue without dashboard');
+    }
 }
 main().catch((error) => {
     console.error('Fatal error in main():', error);

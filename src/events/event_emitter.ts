@@ -37,6 +37,11 @@ export enum OrchestrationEventType {
   AGENT_EXECUTION_COMPLETED = 'agent:execution_completed',
   AGENT_EXECUTION_FAILED = 'agent:execution_failed',
 
+  // Agent internal operations (from transcript watcher)
+  AGENT_THINKING = 'agent:thinking',
+  AGENT_TOOL_USE = 'agent:tool_use',
+  AGENT_TOOL_RESULT = 'agent:tool_result',
+
   // Coordination
   COORDINATION_STARTED = 'coordination:started',
   COORDINATION_COMPLETED = 'coordination:completed',
