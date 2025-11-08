@@ -6,28 +6,40 @@
  */
 import { createServer } from 'http';
 import { orchestrationEvents } from './event_emitter.js';
+import { findAvailablePort } from '../utils/port-finder.js';
 /**
  * HTTP server that provides SSE endpoint for dashboard
  */
 export class DashboardBridge {
     server = null;
     config;
+    actualPort = 0;
     sseClients = new Set();
     constructor(config) {
         this.config = config;
+    } /**
+     * Get the actual port the server is listening on
+     */
+    getPort() {
+        return this.actualPort;
     }
     /**
      * Start the bridge server
      */
     async start() {
+        const preferredPort = this.config.port;
+        this.actualPort = await findAvailablePort(preferredPort, this.config.host);
+        if (this.actualPort !== preferredPort) {
+            console.log(`[DashboardBridge] Port ${preferredPort} in use, using port ${this.actualPort} instead`);
+        }
         return new Promise((resolve, reject) => {
             this.server = createServer(this.handleRequest.bind(this));
             this.server.on('error', (error) => {
                 console.error('[DashboardBridge] Server error:', error);
                 reject(error);
             });
-            this.server.listen(this.config.port, this.config.host, () => {
-                console.log(`[DashboardBridge] Listening on http://${this.config.host}:${this.config.port}`);
+            this.server.listen(this.actualPort, this.config.host, () => {
+                console.log(`[DashboardBridge] Listening on http://${this.config.host}:${this.actualPort}`);
                 this.subscribeToEvents();
                 resolve();
             });
@@ -202,7 +214,7 @@ export class DashboardBridge {
  */
 export function createDashboardBridge(config) {
     const defaultConfig = {
-        port: parseInt(process.env.DASHBOARD_PORT || '3001', 10),
+        port: parseInt(process.env.DASHBOARD_BRIDGE_PORT || '3001', 10),
         host: process.env.DASHBOARD_HOST || '127.0.0.1',
         cors_origin: process.env.DASHBOARD_CORS_ORIGIN || 'http://localhost:3000'
     };

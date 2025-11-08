@@ -15,10 +15,14 @@ export interface DashboardLauncherConfig {
  */
 export declare class DashboardLauncher {
     private config;
+    private actualPort;
     private httpServer;
     private isRunning;
     private startupPromise;
-    constructor(config: DashboardLauncherConfig);
+    constructor(config: DashboardLauncherConfig); /**
+     * Get the actual port the server is listening on
+     */
+    getPort(): number;
     /**
      * Start the dashboard
      */

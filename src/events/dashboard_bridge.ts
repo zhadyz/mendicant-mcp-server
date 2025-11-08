@@ -7,6 +7,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { orchestrationEvents, OrchestrationEventType } from './event_emitter.js';
+import { findAvailablePort } from '../utils/port-finder.js';
 
 export interface DashboardBridgeConfig {
   port: number;
@@ -20,16 +21,28 @@ export interface DashboardBridgeConfig {
 export class DashboardBridge {
   private server: ReturnType<typeof createServer> | null = null;
   private config: DashboardBridgeConfig;
+  private actualPort: number = 0;
   private sseClients: Set<ServerResponse> = new Set();
 
   constructor(config: DashboardBridgeConfig) {
     this.config = config;
+  }  /**
+   * Get the actual port the server is listening on
+   */
+  getPort(): number {
+    return this.actualPort;
   }
+
 
   /**
    * Start the bridge server
    */
   async start(): Promise<void> {
+    const preferredPort = this.config.port;
+    this.actualPort = await findAvailablePort(preferredPort, this.config.host);
+    if (this.actualPort !== preferredPort) {
+      console.log(`[DashboardBridge] Port ${preferredPort} in use, using port ${this.actualPort} instead`);
+    }
     return new Promise((resolve, reject) => {
       this.server = createServer(this.handleRequest.bind(this));
 
@@ -38,8 +51,8 @@ export class DashboardBridge {
         reject(error);
       });
 
-      this.server.listen(this.config.port, this.config.host, () => {
-        console.log(`[DashboardBridge] Listening on http://${this.config.host}:${this.config.port}`);
+      this.server.listen(this.actualPort, this.config.host, () => {
+        console.log(`[DashboardBridge] Listening on http://${this.config.host}:${this.actualPort}`);
         this.subscribeToEvents();
         resolve();
       });
@@ -232,7 +245,7 @@ export class DashboardBridge {
  */
 export function createDashboardBridge(config?: Partial<DashboardBridgeConfig>): DashboardBridge {
   const defaultConfig: DashboardBridgeConfig = {
-    port: parseInt(process.env.DASHBOARD_PORT || '3001', 10),
+    port: parseInt(process.env.DASHBOARD_BRIDGE_PORT || '3001', 10),
     host: process.env.DASHBOARD_HOST || '127.0.0.1',
     cors_origin: process.env.DASHBOARD_CORS_ORIGIN || 'http://localhost:3000'
   };

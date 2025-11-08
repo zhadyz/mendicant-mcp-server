@@ -9,6 +9,7 @@ import { createServer, type Server } from 'http';
 import { join, extname } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { findAvailablePort } from '../utils/port-finder.js';
 import { dirname } from 'path';
 
 export interface DashboardLauncherConfig {
@@ -23,13 +24,20 @@ export interface DashboardLauncherConfig {
  */
 export class DashboardLauncher {
   private config: DashboardLauncherConfig;
+  private actualPort: number = 0;
   private httpServer: Server | null = null;
   private isRunning = false;
   private startupPromise: Promise<void> | null = null;
 
   constructor(config: DashboardLauncherConfig) {
     this.config = config;
+  }  /**
+   * Get the actual port the server is listening on
+   */
+  getPort(): number {
+    return this.actualPort;
   }
+
 
   /**
    * Start the dashboard
@@ -130,12 +138,19 @@ export class DashboardLauncher {
         res.end('Internal Server Error');
       }
     });
+    // Find an available port
+    const preferredPort = this.config.port;
+    this.actualPort = await findAvailablePort(preferredPort, '127.0.0.1');
+    if (this.actualPort !== preferredPort) {
+      console.log(`[DashboardLauncher] Port ${preferredPort} in use, using port ${this.actualPort} instead`);
+    }
+
 
     // Start listening
     await new Promise<void>((resolve, reject) => {
-      this.httpServer!.listen(this.config.port, () => {
+      this.httpServer!.listen(this.actualPort, () => {
         this.isRunning = true;
-        console.log(`[DashboardLauncher] Dashboard HTTP server started on http://localhost:${this.config.port}`);
+        console.log(`[DashboardLauncher] Dashboard HTTP server started on http://localhost:${this.actualPort}`);
         resolve();
       });
 
@@ -178,8 +193,8 @@ export class DashboardLauncher {
   getStatus() {
     return {
       running: this.isRunning,
-      port: this.config.port,
-      url: `http://localhost:${this.config.port}`
+      port: this.actualPort,
+      url: `http://localhost:${this.actualPort}`
     };
   }
 

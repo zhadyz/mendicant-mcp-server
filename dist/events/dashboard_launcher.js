@@ -8,17 +8,24 @@ import { createServer } from 'http';
 import { join, extname } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { findAvailablePort } from '../utils/port-finder.js';
 import { dirname } from 'path';
 /**
  * Dashboard HTTP server manager
  */
 export class DashboardLauncher {
     config;
+    actualPort = 0;
     httpServer = null;
     isRunning = false;
     startupPromise = null;
     constructor(config) {
         this.config = config;
+    } /**
+     * Get the actual port the server is listening on
+     */
+    getPort() {
+        return this.actualPort;
     }
     /**
      * Start the dashboard
@@ -109,11 +116,17 @@ export class DashboardLauncher {
                 res.end('Internal Server Error');
             }
         });
+        // Find an available port
+        const preferredPort = this.config.port;
+        this.actualPort = await findAvailablePort(preferredPort, '127.0.0.1');
+        if (this.actualPort !== preferredPort) {
+            console.log(`[DashboardLauncher] Port ${preferredPort} in use, using port ${this.actualPort} instead`);
+        }
         // Start listening
         await new Promise((resolve, reject) => {
-            this.httpServer.listen(this.config.port, () => {
+            this.httpServer.listen(this.actualPort, () => {
                 this.isRunning = true;
-                console.log(`[DashboardLauncher] Dashboard HTTP server started on http://localhost:${this.config.port}`);
+                console.log(`[DashboardLauncher] Dashboard HTTP server started on http://localhost:${this.actualPort}`);
                 resolve();
             });
             this.httpServer.on('error', (error) => {
@@ -150,8 +163,8 @@ export class DashboardLauncher {
     getStatus() {
         return {
             running: this.isRunning,
-            port: this.config.port,
-            url: `http://localhost:${this.config.port}`
+            port: this.actualPort,
+            url: `http://localhost:${this.actualPort}`
         };
     }
     /**

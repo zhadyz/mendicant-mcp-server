@@ -780,7 +780,7 @@ async function main() {
       cors_origin: '*'
     });
     await dashboardBridge.start();
-    debugLog('[Dashboard] SSE bridge started on port 3001');
+    debugLog(`[Dashboard] SSE bridge started on port ${dashboardBridge.getPort()}`)
 
     // Start agent transcript watcher
     await agentTranscriptWatcher.start();
@@ -794,7 +794,7 @@ async function main() {
 
     if (process.env.MENDICANT_AUTO_LAUNCH_DASHBOARD !== 'false') {
       await dashboardLauncher.start();
-      debugLog('[Dashboard] Next.js dashboard started on port 3000');
+      debugLog(`[Dashboard] Next.js dashboard started on port ${dashboardLauncher.getPort()}`)
 
       // Auto-open browser to dashboard (cross-platform)
       if (process.env.MENDICANT_AUTO_OPEN_BROWSER !== 'false') {

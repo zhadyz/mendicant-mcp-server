@@ -15,8 +15,12 @@ export interface DashboardBridgeConfig {
 export declare class DashboardBridge {
     private server;
     private config;
+    private actualPort;
     private sseClients;
-    constructor(config: DashboardBridgeConfig);
+    constructor(config: DashboardBridgeConfig); /**
+     * Get the actual port the server is listening on
+     */
+    getPort(): number;
     /**
      * Start the bridge server
      */
