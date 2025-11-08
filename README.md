@@ -500,11 +500,17 @@ Add to your Claude Code MCP configuration:
   "mcpServers": {
     "mendicant": {
       "command": "npx",
-      "args": ["-y", "github:zhadyz/mendicant-mcp-server"]
+      "args": ["-y", "mendicant-mcp-server"]
     }
   }
 }
 ```
+
+**What you get:**
+- ✅ Pre-built MCP server (692.5 kB package)
+- ✅ Built-in dashboard on `http://localhost:3000`
+- ✅ Zero build time - instant startup
+- ✅ Automatic updates when new versions published
 
 Restart Claude Code, then verify:
 ```
