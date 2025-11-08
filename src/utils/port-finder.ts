@@ -20,7 +20,7 @@ async function isPortAvailable(port: number, host: string = '127.0.0.1'): Promis
       resolve(true);
     });
 
-    server.listen(port, host);
+    server.listen(port); // Test all interfaces
   });
 }
 

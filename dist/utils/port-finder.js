@@ -17,7 +17,7 @@ async function isPortAvailable(port, host = '127.0.0.1') {
             server.close();
             resolve(true);
         });
-        server.listen(port, host);
+        server.listen(port); // Test all interfaces
     });
 }
 /**
