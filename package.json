@@ -1,7 +1,7 @@
 {
   "name": "mendicant-mcp-server",
-  "version": "0.6.2",
-  "description": "MCP Server for mendicant_bias orchestration intelligence - orchestrates AI agents for complex software tasks",
+  "version": "0.7.0",
+  "description": "MCP Server for mendicant_bias orchestration intelligence - orchestrates AI agents for complex software tasks with V2 delegation enforcement",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
@@ -29,7 +29,8 @@
     "mendicant",
     "ai-agents",
     "claude",
-    "claude-code"
+    "claude-code",
+    "delegation-enforcement"
   ],
   "author": "zhadyz",
   "license": "MIT",
